@@ -1,0 +1,292 @@
+
+
+
+#wifm-world-info-redesign {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    position: relative;
+    overflow: hidden;
+}
+
+
+#wifm-main-toolbar {
+    display: flex;
+    flex-direction: row; 
+    align-items: center;
+    gap: 5px;
+    padding: 5px;
+    background-color: var(--color-bg-secondary);
+    border-bottom: 1px solid var(--separator-color);
+    flex-wrap: wrap; 
+    min-height: 36px;
+}
+#wifm-main-toolbar .menu_button {
+    white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 30px;
+    padding: 0 10px;
+    margin: 0;
+}
+#wifm-current-wi-display {
+    margin-left: auto; 
+    font-size: 0.9em;
+    padding: 0 10px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+#wifm-explorer-toggle-btn {
+    font-weight: bold;
+    border: 1px solid var(--accent_color);
+    padding: 5px 10px;
+}
+
+
+#wifm-folder-explorer-window {
+    position: absolute;
+    top: 45px;
+    left: 10px;
+    width: 400px;
+    height: 550px;
+    
+    background-color: var(--smart-context-bg, #1a1b1e); 
+    border: 1px solid var(--separator-color);
+    box-shadow: 0 10px 30px rgba(0,0,0,0.8);
+    border-radius: 8px;
+    z-index: 2000;
+    display: flex;
+    flex-direction: column;
+    resize: both;
+    overflow: hidden;
+    
+    
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(-10px);
+    transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+#wifm-folder-explorer-window.visible {
+    opacity: 1;
+    pointer-events: auto; 
+    transform: translateY(0);
+}
+
+
+.wifm-explorer-header {
+    padding: 8px;
+    background-color: var(--color-bg-tertiary, rgba(0,0,0,0.2));
+    border-bottom: 1px solid var(--separator-color);
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+
+.wifm-explorer-toolbar {
+    padding: 5px;
+    background-color: var(--color-bg-secondary);
+    border-bottom: 1px solid var(--separator-color);
+    display: flex;
+    gap: 5px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+.wifm-breadcrumb-path {
+    flex-grow: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-weight: bold;
+    padding: 0 5px;
+}
+
+.wifm-explorer-body {
+    flex-grow: 1;
+    overflow-y: auto;
+    padding: 10px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+    grid-auto-rows: min-content;
+    gap: 15px;
+    align-content: start;
+    background-color: rgba(0, 0, 0, 0.1); 
+}
+
+
+.wifm-explorer-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    cursor: pointer;
+    padding: 5px;
+    border-radius: 4px;
+    position: relative;
+    color: var(--text_color);
+}
+
+.wifm-explorer-item:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+.wifm-item-icon {
+    font-size: 36px;
+    margin-bottom: 5px;
+}
+.wifm-explorer-item[data-type="folder"] .wifm-item-icon { color: #f1c40f; }
+.wifm-explorer-item[data-type="file"] .wifm-item-icon { color: #3498db; }
+
+.wifm-explorer-item.active-wi .wifm-item-icon { color: #2ecc71; text-shadow: 0 0 5px #2ecc71; }
+
+.wifm-item-name {
+    font-size: 12px;
+    line-height: 1.3;
+    word-break: break-all;
+    max-height: 2.6em;
+    overflow: hidden;
+}
+
+
+.wifm-item-checkbox {
+    position: absolute;
+    top: 0; left: 0;
+    width: 18px; height: 18px;
+    cursor: pointer;
+    z-index: 10;
+}
+
+
+.navigator-body {
+    display: flex;
+    flex-direction: column;
+    flex-grow: 1;
+    overflow: hidden;
+    position: relative; 
+}
+
+#wifm-world-info-panels-wrapper {
+    flex-grow: 1;
+    overflow-y: auto;
+    padding: 10px;
+}
+
+
+.wifm-foldable-container {
+    border: 1px solid var(--separator-color);
+    border-radius: 6px;
+    margin-top: 10px;
+    background-color: var(--color-bg-secondary);
+    overflow: hidden;
+}
+
+.wifm-foldable-header {
+    display: flex;
+    align-items: center;
+    padding: 10px;
+    cursor: pointer;
+    font-weight: bold;
+    background-color: var(--color-bg-tertiary);
+    user-select: none;
+}
+.wifm-foldable-header:hover {
+    filter: brightness(1.1);
+}
+
+.wifm-foldable-toggle {
+    margin-right: 8px;
+    transition: transform 0.2s;
+    display: inline-block;
+}
+
+
+.wifm-foldable-content {
+    display: none; 
+    padding: 10px;
+    border-top: 1px solid var(--separator-color);
+}
+
+
+.wifm-foldable-container.open .wifm-foldable-content {
+    display: block;
+    animation: slideDown 0.2s ease-out;
+}
+.wifm-foldable-container.open .wifm-foldable-toggle {
+    transform: rotate(90deg);
+}
+
+@keyframes slideDown {
+    from { opacity: 0; transform: translateY(-5px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+
+.menu_button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+}
+
+
+.wifm-popup-overlay {
+    position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+    background: rgba(0,0,0,0.6);
+    z-index: 9999;
+    display: flex; align-items: center; justify-content: center;
+}
+.wifm-popup-content {
+    background: var(--smart-theme-bg, #222);
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 5px 20px rgba(0,0,0,0.5);
+    min-width: 300px;
+}
+
+.wifm-foldable-container {
+    border: 1px solid var(--separator-color);
+    border-radius: 4px;
+    margin-bottom: 10px;
+    background-color: rgba(0, 0, 0, 0.2);
+}
+
+.wifm-foldable-header {
+    cursor: pointer;
+    font-weight: bold;
+    padding: 8px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    box-sizing: border-box;
+    background-color: var(--color-bg-secondary);
+}
+
+.wifm-foldable-content {
+    overflow: hidden;
+    max-height: 0; 
+    transition: max-height 0.3s ease-out; 
+    padding: 0 10px;
+}
+
+
+.wifm-foldable-container.open .wifm-foldable-content {
+    max-height: 2000px; 
+    padding: 10px;
+    border-top: 1px solid var(--separator-color);
+}
+
+.wifm-foldable-toggle {
+    transition: transform 0.2s;
+    display: inline-block;
+}
+
+.wifm-foldable-container.open .wifm-foldable-toggle {
+    transform: rotate(90deg);
+}
+
