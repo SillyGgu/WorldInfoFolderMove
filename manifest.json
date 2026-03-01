@@ -1,5 +1,5 @@
 {
-  "display_name": "WorldInfoFolderMove",
+  "display_name": "월드인포 폴더 매니저",
   "loading_order": 10,
   "requires": [],
   "optional": [],
@@ -7,5 +7,5 @@
   "css": "style.css",
 
   "author": "SillyGgu",
-  "version": "2.0.0"
+  "version": "2.0.1"
 }
