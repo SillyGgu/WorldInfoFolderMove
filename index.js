@@ -616,6 +616,17 @@ const WorldInfoFolderMove = {
                     this.renderExplorerView();
                 } else {
                     await this.loadLorebook(item.name);
+
+                    const searchInput = document.getElementById('wifm-explorer-search');
+                    if (searchInput && searchInput.value.trim() !== '') {
+                        const ownerFolder = this.findFolderForLorebook(item.name);
+                        
+                        if (ownerFolder) {
+                            this._currentPath = [ownerFolder]; 
+                            searchInput.value = '';         
+                            this.renderExplorerView();         
+                        }
+                    }
                 }
             });
 
@@ -881,13 +892,7 @@ const WorldInfoFolderMove = {
             this.refreshLorebookUI();
         }
     },
-    deleteFolder: function(folderName) {
-        if (confirm(`폴더 '${folderName}' 삭제? (내용물은 유지됨)`)) {
-            delete this.folderState[folderName];
-            this.saveFolderState();
-            this.refreshLorebookUI();
-        }
-    },
+
     showFolderMovePopup: function() {
         if (this._selectedItems.size === 0) return alert('선택된 항목 없음');
 
