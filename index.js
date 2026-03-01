@@ -51,6 +51,8 @@ const WIFM_UI_HTML = `
         <!-- 툴바 -->
         <div class="wifm-explorer-toolbar">
             <div id="wifm-world-info-new-folder" class="menu_button menu_button_icon fa-solid fa-folder-plus interactable" title="New Folder"></div>
+            <div id="wifm-world-info-delete-folder" class="menu_button menu_button_icon fa-solid fa-folder-minus interactable" title="Delete Current Folder"></div>
+            <div class="wifm-toolbar-sep"></div>
             <div class="wifm-toolbar-sep"></div>
             <div id="wifm-move-toggle-button" class="menu_button menu_button_icon fa-solid fa-arrows-up-down-left-right interactable" title="Move Mode"></div>
             <div id="wifm-move-actions" style="display:none; align-items:center; gap:4px;">
@@ -312,7 +314,6 @@ const WorldInfoFolderMove = {
                 const currentName = WorldInfoFolderMove._currentWorldName;
                 if (!coreSelect || !currentName) return;
 
-                // options가 비어있으면 world_names로 채운다
                 if (coreSelect.options.length === 0) {
                     const wnames = window.world_names || [];
                     wnames.forEach((wname, idx) => {
@@ -411,6 +412,7 @@ const WorldInfoFolderMove = {
         document.getElementById('wifm-move-confirm-button').addEventListener('click', () => this.showFolderMovePopup());
 
         document.getElementById('wifm-world-info-new-folder').addEventListener('click', () => this.createNewFolder());
+		document.getElementById('wifm-world-info-delete-folder').addEventListener('click', () => this.deleteCurrentFolder());
         document.getElementById('wifm-world-info-new-button').addEventListener('click', async () => {
             const coreCreateBtn = document.getElementById('world_create_button'); 
             if(coreCreateBtn) coreCreateBtn.click(); 
@@ -501,7 +503,14 @@ const WorldInfoFolderMove = {
         const breadcrumb = document.getElementById('wifm-explorer-breadcrumb');
         const backBtn = document.getElementById('wifm-explorer-back-btn');
         if (!container) return;
-
+        const delBtn = document.getElementById('wifm-world-info-delete-folder');
+        if (delBtn) {
+            const currentFolder = this._currentPath.length > 0 ? this._currentPath[this._currentPath.length - 1] : null;
+            const isDeletable = currentFolder && currentFolder !== 'Unassigned';
+            
+            delBtn.style.opacity = isDeletable ? '1' : '0.4';
+            delBtn.style.pointerEvents = isDeletable ? 'auto' : 'none';
+        }
         container.innerHTML = '';
         
         const pathStr = this._currentPath.length === 0 ? 'Home' : 'Home > ' + this._currentPath.join(' > ');
@@ -837,6 +846,37 @@ const WorldInfoFolderMove = {
             const trimmedName = folderName.trim();
             if (this.folderState[trimmedName]) return alert('이미 존재함');
             this.folderState[trimmedName] = { isOpen: true, items: [] };
+            this.saveFolderState();
+            this.refreshLorebookUI();
+        }
+    },
+	deleteCurrentFolder: function() {
+        if (this._currentPath.length === 0) return; 
+        
+        const folderName = this._currentPath[this._currentPath.length - 1];
+
+        if (folderName === 'Unassigned') {
+            return alert("'Unassigned' 폴더는 삭제할 수 없습니다.");
+        }
+
+        if (confirm(`현재 폴더 '${folderName}'를 삭제하시겠습니까?\n\n포함된 월드 인포는 'Unassigned' 폴더로 이동됩니다.`)) {
+            
+            const itemsToMove = this.folderState[folderName]?.items || [];
+            if (itemsToMove.length > 0) {
+                if (!this.folderState['Unassigned']) {
+                    this.folderState['Unassigned'] = { isOpen: true, items: [] };
+                }
+                itemsToMove.forEach(item => {
+                    if (!this.folderState['Unassigned'].items.includes(item)) {
+                        this.folderState['Unassigned'].items.push(item);
+                    }
+                });
+            }
+
+            delete this.folderState[folderName];
+            
+            this._currentPath.pop();
+            
             this.saveFolderState();
             this.refreshLorebookUI();
         }
