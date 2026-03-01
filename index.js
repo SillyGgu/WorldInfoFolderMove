@@ -240,6 +240,16 @@ const WorldInfoFolderMove = {
                     dummySelect.style.cssText = 'display:none; position:absolute; visibility:hidden;';
                     document.body.appendChild(dummySelect);
                 }
+                const earlySelect = document.getElementById('world_editor_select');
+                if (earlySelect && world_names && world_names.length > 0) {
+                    earlySelect.innerHTML = '';
+                    world_names.forEach((n, i) => {
+                        const opt = document.createElement('option');
+                        opt.value = String(i);
+                        opt.text = n;
+                        earlySelect.appendChild(opt);
+                    });
+                }
 
 
                 const entriesPanelWrapper = document.querySelector('#wifm-world-info-entries-panel .wifm-panel-content-wrapper');
@@ -454,23 +464,53 @@ const WorldInfoFolderMove = {
         
         const coreEditorSelect = document.getElementById('world_editor_select');
         if (coreEditorSelect) {
+            if (coreEditorSelect.options.length === 0 && world_names && world_names.length > 0) {
+                world_names.forEach((n, i) => {
+                    const opt = document.createElement('option');
+                    opt.value = String(i);
+                    opt.text = n;
+                    coreEditorSelect.appendChild(opt);
+                });
+            }
             $(coreEditorSelect).on('change', () => {
-                const selectedName = coreEditorSelect.options[coreEditorSelect.selectedIndex].text;
+                const selectedOption = coreEditorSelect.options[coreEditorSelect.selectedIndex];
+                if (!selectedOption) return;
+                const selectedName = selectedOption.text;
                 const finalName = (selectedName && selectedName !== '(선택/생성...)') ? selectedName : null;
-                this.updateSelectedLorebookName(finalName);
+                if (finalName) {
+                    WorldInfoFolderMove._currentWorldName = finalName;
+                    WorldInfoFolderMove.updateGlobalButtonState();
+                    WorldInfoFolderMove.updateActiveWorldInfoList();
+                    WorldInfoFolderMove.renderExplorerView();
+                }
+                WorldInfoFolderMove.updateSelectedLorebookName(finalName);
             });
         }
         if (window.displayWorldEntries) {
             const originalDisplay = window.displayWorldEntries;
-            
+
             window.displayWorldEntries = async function(name, data, ...args) {
                 const result = await originalDisplay.apply(this, [name, data, ...args]);
-                
-                this._currentWorldName = name;
+
+                WorldInfoFolderMove._currentWorldName = name;
                 WorldInfoFolderMove.updateSelectedLorebookName(name);
-                
-                if (WorldInfoFolderMove.isExplorerOpen) {
-                    WorldInfoFolderMove.renderExplorerView();
+                WorldInfoFolderMove.updateGlobalButtonState();
+                WorldInfoFolderMove.updateActiveWorldInfoList();
+
+                WorldInfoFolderMove.renderExplorerView();
+
+                const coreSelect = document.getElementById('world_editor_select');
+                if (coreSelect && world_names && world_names.length > 0 && coreSelect.options.length === 0) {
+                    world_names.forEach((n, i) => {
+                        const opt = document.createElement('option');
+                        opt.value = String(i);
+                        opt.text = n;
+                        coreSelect.appendChild(opt);
+                    });
+                }
+                if (coreSelect && name && world_names) {
+                    const idx = world_names.indexOf(name);
+                    if (idx !== -1) coreSelect.value = String(idx);
                 }
 
                 return result;
@@ -939,24 +979,31 @@ const WorldInfoFolderMove = {
         }
         this.saveFolderState();
     },
-    setupCharacterWorldInfoPopupObserver: function() {
-        const self = this;
+	setupCharacterWorldInfoPopupObserver: function() {
+		const self = this;
+
 		const observer = new MutationObserver((mutations) => {
-			for (const m of mutations) {
-				for (const node of m.addedNodes) {
-					if (node.nodeType === 1) {
-						const sel = node.id === 'world_editor_select' ? node : node.querySelector?.('#world_editor_select');
-						if (sel) {
-							console.log('world_editor_select 생성됨! 부모:', sel.parentElement?.id, '조부모:', sel.parentElement?.parentElement?.id);
-							observer.disconnect();
+			for (const mutation of mutations) {
+				if (mutation.addedNodes.length > 0) {
+					mutation.addedNodes.forEach(node => {
+						if (node.nodeType === Node.ELEMENT_NODE) {
+							const dialog = (node.matches && node.matches('dialog.popup')) ? node : node.querySelector('dialog.popup');
+							if (dialog && (dialog.querySelector('.character_world') || dialog.querySelector('.persona_world'))) {
+								self.enhanceWorldInfoPopup(dialog);
+							}
 						}
-					}
+					});
 				}
 			}
 		});
-		observer.observe(document.body, { childList: true, subtree: true });
-		console.log('감지 시작 - 지금 WorldInfo 탭 클릭해보세요');
-    },
+
+		observer.observe(document.body, {
+			childList: true,
+			subtree: true
+		});
+
+		logger.log('Character World Info 팝업 감지 옵저버 시작.');
+	},
 
     enhanceWorldInfoPopup: function(dialog) {
         const selector = dialog.querySelector('.character_world_info_selector') || dialog.querySelector('.persona_world_info_selector');
