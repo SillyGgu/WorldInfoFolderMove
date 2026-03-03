@@ -48,6 +48,16 @@
     border-radius: 4px;
     border: 1px solid var(--separator-color);
     max-width: 200px;
+    
+    cursor: pointer;
+    user-select: none;
+    transition: background-color 0.15s, border-color 0.15s;
+}
+
+#wifm-current-wi-display:hover {
+    background: rgba(255,255,255,0.15);
+    border-color: var(--accent_color);
+    opacity: 1;
 }
 
 #wifm-explorer-toggle-btn {
