@@ -457,6 +457,11 @@ const WorldInfoFolderMove = {
     loadLorebook: async function(name) {
         try {
             await showWorldEditor(name);
+            this._currentWorldName = name;
+            this.updateSelectedLorebookName(name);
+            this.updateGlobalButtonState();
+            this.updateActiveWorldInfoList();
+            this.renderExplorerView();
         } catch (error) {
             logger.error('loadLorebook 오류:', error);
         }
