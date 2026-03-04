@@ -364,13 +364,10 @@ const WorldInfoFolderMove = {
             eventSource.on(event_types.WORLD_INFO_UPDATED, debouncedRefresh);
         }
 
-        // world_editor_select change → 우리 UI 갱신
-        // ST 코어가 rename/delete 후 이 select에 trigger('change')를 쏨
         const coreEditorSelect = document.getElementById('world_editor_select');
         if (coreEditorSelect) {
             $(coreEditorSelect).on('change', () => {
                 if (this._isDeselecting) return;
-                // ST 코어 자체 핸들러가 먼저 실행된 뒤 우리가 처리
                 setTimeout(() => {
                     const sel = document.getElementById('world_editor_select');
                     if (!sel) return;
@@ -392,7 +389,6 @@ const WorldInfoFolderMove = {
             });
         }
 
-        // displayWorldEntries 오버라이드 — 로어북 로드/unload 시 우리 UI 갱신
         if (window.displayWorldEntries) {
             const originalDisplay = window.displayWorldEntries;
             window.displayWorldEntries = async function(name, data, ...args) {
@@ -559,37 +555,42 @@ const WorldInfoFolderMove = {
             el.appendChild(nameSpan);
 
             el.addEventListener('click', async (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                if (e.target.type === 'checkbox') return;
+				e.preventDefault();
+				e.stopPropagation();
+				if (e.target.type === 'checkbox') return;
 
-                if (this.isMoveMode) {
-                    if (item.type === 'file') {
-                        const cb = el.querySelector('input[type="checkbox"]');
-                        if (cb) {
-                            cb.checked = !cb.checked;
-                            cb.dispatchEvent(new Event('click'));
-                        }
-                    }
-                    return;
-                }
+				if (this.isMoveMode) {
+					if (item.type === 'folder') {
+						this._currentPath.push(item.name);
+						this.renderExplorerView();
+					} else {
+						const cb = el.querySelector('input[type="checkbox"]');
+						if (cb) {
+							cb.checked = !cb.checked;
+							if (cb.checked) this._selectedItems.add(item.name);
+							else this._selectedItems.delete(item.name);
+							this.updateMoveActionsVisibility();
+						}
+					}
+					return;
+				}
 
-                if (item.type === 'folder') {
-                    this._currentPath.push(item.name);
-                    this.renderExplorerView();
-                } else {
-                    await this.loadLorebook(item.name);
-                    const searchInput = document.getElementById('wifm-explorer-search');
-                    if (searchInput && searchInput.value.trim() !== '') {
-                        const ownerFolder = this.findFolderForLorebook(item.name);
-                        if (ownerFolder) {
-                            this._currentPath = [ownerFolder];
-                            searchInput.value = '';
-                            this.renderExplorerView();
-                        }
-                    }
-                }
-            });
+				if (item.type === 'folder') {
+					this._currentPath.push(item.name);
+					this.renderExplorerView();
+				} else {
+					await this.loadLorebook(item.name);
+					const searchInput = document.getElementById('wifm-explorer-search');
+					if (searchInput && searchInput.value.trim() !== '') {
+						const ownerFolder = this.findFolderForLorebook(item.name);
+						if (ownerFolder) {
+							this._currentPath = [ownerFolder];
+							searchInput.value = '';
+							this.renderExplorerView();
+						}
+					}
+				}
+			});
 
             fragment.appendChild(el);
         });
@@ -750,22 +751,58 @@ const WorldInfoFolderMove = {
         const header = document.getElementById('wifm-move-target-header');
         const list   = document.getElementById('wifm-move-target-list');
         if (!view || !list) return;
-        if (header) header.textContent = `이동할 폴더 선택 (${this._selectedItems.size}개)`;
+        if (header) {
+            header.innerHTML = `<i class="fa-solid fa-arrows-up-down-left-right" style="opacity:0.7; margin-right:6px;"></i>이동할 폴더 선택 <span style="opacity:0.6; font-size:0.85em;">(${this._selectedItems.size}개 선택됨)</span>`;
+        }
         list.innerHTML = '';
+
+        let selectedFolder = null;
 
         const searchInput = document.createElement('input');
         searchInput.type = 'search';
-        searchInput.placeholder = '폴더 검색...';
+        searchInput.placeholder = '🔍 폴더 검색...';
         searchInput.className = 'text_pole';
-        searchInput.style.cssText = 'width:100%; height:28px; margin-bottom:6px; box-sizing:border-box;';
+        searchInput.style.cssText = 'width:100%; height:30px; margin-bottom:8px; box-sizing:border-box;';
         list.appendChild(searchInput);
 
         const folderListInner = document.createElement('div');
-        folderListInner.style.cssText = 'display:flex; flex-direction:column; gap:4px;';
+        folderListInner.style.cssText = 'display:flex; flex-direction:column; gap:4px; flex-grow:1; overflow-y:auto;';
         list.appendChild(folderListInner);
+
+        const confirmRow = document.createElement('div');
+        confirmRow.style.cssText = 'display:flex; flex-direction:row; gap:6px; margin-top:10px; padding-top:8px; border-top:1px solid var(--separator-color); flex-shrink:0;';
+
+        const confirmBtn = document.createElement('button');
+        confirmBtn.className = 'menu_button greenBG';
+        confirmBtn.style.cssText = 'flex:1; height:32px; display:inline-flex; align-items:center; justify-content:center; gap:6px; border-radius:5px; font-size:0.88em; cursor:pointer; opacity:0.4; pointer-events:none;';
+        confirmBtn.innerHTML = '<i class="fa-solid fa-check"></i> 여기로 이동';
+
+        const cancelBtn = document.createElement('button');
+        cancelBtn.className = 'menu_button redWarningBG';
+        cancelBtn.style.cssText = 'flex:1; height:32px; display:inline-flex; align-items:center; justify-content:center; gap:6px; border-radius:5px; font-size:0.88em; cursor:pointer;';
+        cancelBtn.innerHTML = '<i class="fa-solid fa-xmark"></i> 취소';
+
+        confirmRow.appendChild(confirmBtn);
+        confirmRow.appendChild(cancelBtn);
+        list.appendChild(confirmRow);
 
         const allFolders = Object.keys(this.folderState).filter(n => n !== 'Unassigned').sort();
         allFolders.push('Unassigned');
+
+        const setSelected = (f, btnEl) => {
+            selectedFolder = f;
+            folderListInner.querySelectorAll('.wifm-popup-folder-btn').forEach(b => {
+                b.style.background = '';
+                b.style.borderColor = 'transparent';
+                b.style.boxShadow = '';
+            });
+            btnEl.style.background = 'rgba(var(--accent_color_rgb, 124, 92, 191), 0.25)';
+            btnEl.style.borderColor = 'var(--accent_color, #7c5cbf)';
+            btnEl.style.boxShadow = '0 0 0 1px var(--accent_color, #7c5cbf)';
+            confirmBtn.style.opacity = '1';
+            confirmBtn.style.pointerEvents = 'auto';
+            confirmBtn.innerHTML = `<i class="fa-solid fa-check"></i> "${f === 'Unassigned' ? '폴더 없음' : f}" 으로 이동`;
+        };
 
         const renderFolderList = (filterTerm) => {
             folderListInner.innerHTML = '';
@@ -773,18 +810,32 @@ const WorldInfoFolderMove = {
             filtered.forEach(f => {
                 const btn = document.createElement('div');
                 btn.className = 'wifm-popup-folder-btn';
-                btn.innerHTML = `<i class="fa-solid ${f === 'Unassigned' ? 'fa-folder-open' : 'fa-folder'}"></i><span>${f === 'Unassigned' ? '폴더 없음' : f}</span>`;
-                btn.onclick = () => {
-                    const currentSearchTerm = document.getElementById('wifm-explorer-search')?.value || null;
-                    this._selectedItems.forEach(wi => this.moveLorebookToFolder(wi, f));
-                    this.toggleMoveMode(false);
-                    view.classList.remove('visible');
-                    if (currentSearchTerm && currentSearchTerm.trim() !== '') this.renderExplorerView(currentSearchTerm);
-                    else this.refreshLorebookUI();
-                };
+                btn.style.cssText = 'border:1px solid transparent; transition: background-color 0.15s, border-color 0.15s, box-shadow 0.15s;';
+                const isUnassigned = f === 'Unassigned';
+                btn.innerHTML = `<i class="fa-solid ${isUnassigned ? 'fa-folder-open' : 'fa-folder'}" style="color:${isUnassigned ? '#aaa' : '#e8c040'};"></i><span>${isUnassigned ? '폴더 없음 (Unassigned)' : f}</span>`;
+                if (selectedFolder === f) {
+                    btn.style.background = 'rgba(var(--accent_color_rgb, 124, 92, 191), 0.25)';
+                    btn.style.borderColor = 'var(--accent_color, #7c5cbf)';
+                    btn.style.boxShadow = '0 0 0 1px var(--accent_color, #7c5cbf)';
+                }
+                btn.onclick = () => setSelected(f, btn);
                 folderListInner.appendChild(btn);
             });
-            if (filtered.length === 0) folderListInner.innerHTML = '<div style="text-align:center; padding:10px; opacity:0.6;">검색 결과 없음</div>';
+            if (filtered.length === 0) folderListInner.innerHTML = '<div style="text-align:center; padding:12px; opacity:0.5; font-size:0.88em;">검색 결과 없음</div>';
+        };
+
+        confirmBtn.onclick = () => {
+            if (!selectedFolder) return;
+            const currentSearchTerm = document.getElementById('wifm-explorer-search')?.value || null;
+            this._selectedItems.forEach(wi => this.moveLorebookToFolder(wi, selectedFolder));
+            this.toggleMoveMode(false);
+            view.classList.remove('visible');
+            if (currentSearchTerm && currentSearchTerm.trim() !== '') this.renderExplorerView(currentSearchTerm);
+            else this.refreshLorebookUI();
+        };
+
+        cancelBtn.onclick = () => {
+            view.classList.remove('visible');
         };
 
         renderFolderList('');
@@ -854,6 +905,8 @@ const WorldInfoFolderMove = {
         });
     },
 };
+
+
 
 jQuery(async () => {
     const initExtension = async () => {

@@ -582,7 +582,7 @@ box-sizing: border-box;
 #wifm-move-target-view {
     display: none;
     position: absolute;
-    top: 41px; 
+    top: 41px;
     left: 0;
     right: 0;
     bottom: 0;
@@ -590,8 +590,60 @@ box-sizing: border-box;
     z-index: 100;
     padding: 15px;
     flex-direction: column;
-    gap: 15px;
+    gap: 10px;
+    overflow-y: hidden;
+}
+
+#wifm-move-target-view {
+    gap: 0;
+    padding: 0;
+}
+
+#wifm-move-target-view .wifm-overlay-header {
+    padding: 10px 14px;
+    margin: 0;
+    background: linear-gradient(135deg, var(--color-bg-tertiary, rgba(0,0,0,0.3)), rgba(0,0,0,0.15));
+    border-bottom: 1px solid var(--separator-color);
+    font-size: 0.95em;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+#wifm-move-target-list {
+    flex-grow: 1;
     overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    padding: 10px 12px;
+}
+
+#wifm-move-target-list::-webkit-scrollbar {
+    width: 5px;
+}
+#wifm-move-target-list::-webkit-scrollbar-thumb {
+    background: rgba(255,255,255,0.15);
+    border-radius: 3px;
+}
+
+#wifm-move-target-cancel {
+    display: none;
+}
+
+#wifm-folder-explorer-window.wifm-light-theme #wifm-move-target-view .wifm-overlay-header {
+    background: #e0e0e0;
+    border-bottom: 1px solid #ccc;
+    color: #333;
+}
+
+#wifm-folder-explorer-window.wifm-light-theme #wifm-move-target-list .wifm-popup-folder-btn {
+    color: #333;
+    background-color: rgba(0,0,0,0.03);
+}
+#wifm-folder-explorer-window.wifm-light-theme #wifm-move-target-list .wifm-popup-folder-btn:hover {
+    background-color: rgba(0,0,0,0.08);
 }
 
 
