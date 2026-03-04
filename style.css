@@ -3,10 +3,9 @@
     flex-direction: column;
     height: 100%;
     position: relative;
-    overflow: hidden;
+    overflow: visible;
+    contain: layout;
 }
-
-
 #wifm-main-toolbar {
     display: flex;
     flex-direction: row;
@@ -247,11 +246,6 @@
 
 .wifm-explorer-item:hover {
     background-color: rgba(255, 255, 255, 0.1);
-    transform: translateY(-1px);
-}
-
-.wifm-explorer-item:active {
-    transform: translateY(0);
 }
 
 .wifm-item-icon {
@@ -302,12 +296,13 @@
 display: flex;
 flex-direction: column;
 flex-grow: 1;
-overflow: hidden;
+overflow: visible;
 position: relative;
+contain: layout;
 }
 #wifm-world-info-panels-wrapper {
 flex-grow: 1;
-overflow-y: auto;
+overflow: visible;
 padding: 10px 2px 10px 10px;
 }
 #world_popup_entries_list {
@@ -709,4 +704,89 @@ box-sizing: border-box;
     display: flex;
     flex-direction: column;
     gap: 4px;
+}
+
+/* ─── Floating Modal 공통 (수정모드, 타이틀, 일괄설정) ─── */
+
+#wifm-edit-modal > div,
+#wifm-title-modal > div,
+#wifm-bulk-modal > div {
+    color: var(--text_color);
+}
+
+#wifm-edit-modal > div.wifm-light-theme,
+#wifm-title-modal > div.wifm-light-theme,
+#wifm-bulk-modal > div.wifm-light-theme {
+    background-color: #f2f2f2 !important;
+    color: #333 !important;
+    border-color: #ccc !important;
+}
+
+#wifm-edit-modal > div.wifm-light-theme small,
+#wifm-title-modal > div.wifm-light-theme small,
+#wifm-bulk-modal > div.wifm-light-theme small {
+    color: #555;
+}
+
+#wifm-edit-modal > div.wifm-light-theme .text_pole,
+#wifm-title-modal > div.wifm-light-theme .text_pole,
+#wifm-bulk-modal > div.wifm-light-theme .text_pole {
+    background-color: #ffffff;
+    color: #333;
+    border-color: #ccc;
+}
+
+#wifm-edit-modal > div.wifm-light-theme .menu_button,
+#wifm-title-modal > div.wifm-light-theme .menu_button,
+#wifm-bulk-modal > div.wifm-light-theme .menu_button {
+    color: #444;
+    background-color: rgba(0,0,0,0.08);
+}
+
+#wifm-edit-modal > div.wifm-light-theme .menu_button:hover,
+#wifm-title-modal > div.wifm-light-theme .menu_button:hover,
+#wifm-bulk-modal > div.wifm-light-theme .menu_button:hover {
+    background-color: rgba(0,0,0,0.15);
+}
+
+#world_popup_entries_list {
+    overflow: visible !important;
+    height: auto !important;
+    max-height: none !important;
+    position: relative !important;
+}
+
+#world_popup_entries_list > .world_entry.ui-sortable-helper {
+    position: fixed !important;
+    margin: 0 !important;
+    will-change: transform;
+    contain: layout style;
+}
+
+@media (max-width: 768px) {
+    #wifm-edit-modal,
+    #wifm-title-modal,
+    #wifm-bulk-modal {
+        position: fixed !important;
+        top: 0 !important;
+        left: 0 !important;
+        width: 100vw !important;
+        height: 100vh !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        padding: 16px !important;
+        box-sizing: border-box !important;
+        z-index: 99999 !important;
+    }
+
+    #wifm-edit-modal > div,
+    #wifm-title-modal > div,
+    #wifm-bulk-modal > div {
+        width: 100% !important;
+        max-width: 100% !important;
+        max-height: 80vh !important;
+        overflow-y: auto !important;
+        box-sizing: border-box !important;
+    }
 }

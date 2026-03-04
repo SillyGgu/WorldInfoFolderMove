@@ -1,6 +1,6 @@
 import { debounce } from '../../../../scripts/utils.js';
 import { Popup } from '../../../../scripts/popup.js';
-import { showWorldEditor, world_names, loadWorldInfo } from '../../../../scripts/world-info.js';
+import { showWorldEditor, world_names, loadWorldInfo, worldInfoCache } from '../../../../scripts/world-info.js';
 import { eventSource, event_types } from '../../../../script.js';
 import { accountStorage } from '../../../../scripts/util/AccountStorage.js';
 
@@ -103,6 +103,8 @@ const WIFM_UI_HTML = `
                         <div id="wifm-world-info-entry-apply-sort" class="menu_button menu_button_icon fa-solid fa-arrow-down-9-1 interactable" title="Apply current sorting"></div>
                         <div id="wibm_bulk_move_wi_entries" class="interactable" style="display:none;"></div>
                         <div style="margin-left:auto; display:flex; align-items:center; gap:4px;">
+                            <div id="wifm-tool-export-titles" class="menu_button menu_button_icon fa-solid fa-file-lines interactable" title="Export/Import Entry Titles"></div>
+                            <div id="wifm-tool-bulk-settings" class="menu_button menu_button_icon fa-solid fa-sliders interactable" title="Bulk Change Entry Settings"></div>
                             <div id="wifm-world-info-entry-search-toggle" class="menu_button menu_button_icon fa-solid fa-magnifying-glass interactable" title="Search Entries"></div>
                             <select id="wifm-world-info-entry-sort" class="text_pole margin0"></select>
                             <div id="wifm-world-info-entry-refresh" class="menu_button menu_button_icon fa-solid fa-arrows-rotate interactable" title="Refresh"></div>
@@ -116,7 +118,7 @@ const WIFM_UI_HTML = `
                         <strong>Activated:</strong> <span id="wifm-active-list-content">None</span>
                     </div>
                     <div id="world_info_pagination" class="pagination-container"></div>
-                    <div id="world_popup_entries_list" class="list-group" style="flex-grow:1; overflow-y:auto;"></div>
+                    <div id="world_popup_entries_list" class="list-group"></div>
                     <div id="wifm-editor-placeholder"></div>
                 </div>
             </div>
@@ -145,6 +147,8 @@ const WorldInfoFolderMove = {
     _uiInjected: false,
     _isDeselecting: false,
     _listenersRegistered: false,
+    _entryObserver: null,
+    _csrfToken: null,
     isMoveMode: false,
     folderState: {},
     explorerSettings: { scale: 1.0, lightTheme: false },
@@ -277,6 +281,41 @@ const WorldInfoFolderMove = {
                 $(originalSort).trigger('change');
             });
         }
+        // Entry 수정 모드 버튼 ──
+        const injectEditButtons = (container) => {
+            container.querySelectorAll('.world_entry[uid]').forEach(entry => {
+                if (entry.querySelector('.wifm-edit-mode-btn')) return;
+                const uid = entry.getAttribute('uid');
+                const headerControls = entry.querySelector('.gap5px.world_entry_thin_controls');
+                if (!headerControls) return;
+                const btn = document.createElement('div');
+                btn.className = 'wifm-edit-mode-btn menu_button_icon fa-solid fa-pen-to-square interactable';
+                btn.style.cssText = 'cursor:pointer; padding:2px 5px; font-size:0.9em; opacity:0.8;';
+                btn.title = '수정 모드로 열기';
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    WorldInfoFolderMove.openEditModal(entry, uid);
+                });
+                const toggleIcon = headerControls.querySelector('.inline-drawer-icon');
+                if (toggleIcon) toggleIcon.after(btn);
+                else headerControls.prepend(btn);
+            });
+        };
+
+        const entriesList = document.getElementById('world_popup_entries_list');
+        if (entriesList) {
+            injectEditButtons(entriesList);
+            if (this._entryObserver) this._entryObserver.disconnect();
+            this._entryObserver = new MutationObserver(() => injectEditButtons(entriesList));
+            this._entryObserver.observe(entriesList, { childList: true, subtree: true });
+        }
+
+        document.getElementById('wifm-tool-export-titles')?.addEventListener('click', () => {
+            WorldInfoFolderMove.openTitleExportModal();
+        });
+        document.getElementById('wifm-tool-bulk-settings')?.addEventListener('click', () => {
+            WorldInfoFolderMove.openBulkSettingsModal();
+        });
     },
 
     setupEventListeners: function() {
@@ -355,7 +394,6 @@ const WorldInfoFolderMove = {
             explorerSearch.addEventListener('input', debounce(() => this.renderExplorerView(explorerSearch.value), 300));
         }
 
-        // ST 이벤트 리스너 (중복 방지)
         if (!this._listenersRegistered) {
             this._listenersRegistered = true;
             const debouncedRefresh = debounce(() => this.refreshLorebookUI(), 150);
@@ -389,7 +427,7 @@ const WorldInfoFolderMove = {
             });
         }
 
-        if (window.displayWorldEntries) {
+        if (window.displayWorldEntries && !window.displayWorldEntries._wifmWrapped) {
             const originalDisplay = window.displayWorldEntries;
             window.displayWorldEntries = async function(name, data, ...args) {
                 const result = await originalDisplay.apply(this, [name, data, ...args]);
@@ -406,6 +444,7 @@ const WorldInfoFolderMove = {
                 WorldInfoFolderMove.renderExplorerView();
                 return result;
             };
+            window.displayWorldEntries._wifmWrapped = true;
         }
     },
 
@@ -684,7 +723,7 @@ const WorldInfoFolderMove = {
         accountStorage.setItem(this.settingsKey, JSON.stringify(this.explorerSettings));
     },
 
-    applyExplorerSettings: function() {
+        applyExplorerSettings: function() {
         const win = document.getElementById('wifm-folder-explorer-window');
         if (!win) return;
         win.style.setProperty('--wifm-scale', this.explorerSettings.scale);
@@ -695,6 +734,13 @@ const WorldInfoFolderMove = {
         if (scaleInput) scaleInput.value = this.explorerSettings.scale;
         if (scaleVal)   scaleVal.textContent = this.explorerSettings.scale + 'x';
         if (themeInput) themeInput.checked = this.explorerSettings.lightTheme;
+
+        ['wifm-edit-modal', 'wifm-title-modal', 'wifm-bulk-modal'].forEach(id => {
+            const overlay = document.getElementById(id);
+            if (!overlay) return;
+            const modal = overlay.querySelector('div');
+            if (modal) modal.classList.toggle('wifm-light-theme', this.explorerSettings.lightTheme);
+        });
     },
 
     toggleSettingsView: function(forceState) {
@@ -871,6 +917,484 @@ const WorldInfoFolderMove = {
         });
         observer.observe(document.body, { childList: true, subtree: true });
         logger.log('Character World Info 팝업 감지 옵저버 시작.');
+    },
+	
+    _getSTHeaders: async function() {
+        if (this._csrfToken) return { 'Content-Type': 'application/json', 'X-CSRF-Token': this._csrfToken };
+        try {
+            const resp = await fetch('/csrf-token');
+            const data = await resp.json();
+            this._csrfToken = data.token;
+            return { 'Content-Type': 'application/json', 'X-CSRF-Token': this._csrfToken };
+        } catch(e) {
+            logger.error('CSRF 토큰 획득 실패:', e);
+            return { 'Content-Type': 'application/json' };
+        }
+    },
+
+    // ── Entry 수정 모드 팝업 ──
+    openEditModal: async function(entryEl, uid) {
+        const existing = document.getElementById('wifm-edit-modal');
+        if (existing) existing.remove();
+
+        // ── DOM 완전 우회: loadWorldInfo로 직접 데이터 읽기 ──
+        const lorebookName = this._currentWorldName;
+        if (!lorebookName) return alert('로어북이 선택되지 않았습니다.');
+
+        let wiData;
+        try {
+            worldInfoCache.delete(lorebookName);
+            wiData = await loadWorldInfo(lorebookName);
+        } catch(e) {
+            return alert('데이터 로드 실패: ' + e.message);
+        }
+
+        const uidStr = String(uid);
+        const entryData = wiData?.entries?.[uidStr];
+        if (!entryData) return alert(`UID ${uid} 데이터를 찾을 수 없습니다.`);
+
+        // ── UI 구성 ──
+        const overlay = document.createElement('div');
+        overlay.id = 'wifm-edit-modal';
+        overlay.style.cssText = 'position:fixed; inset:0; z-index:9999; background:rgba(0,0,0,0.55); display:flex; align-items:center; justify-content:center;';
+		overlay.addEventListener('mousedown',  (e) => { e.stopPropagation(); });
+		overlay.addEventListener('click',      (e) => { e.stopPropagation(); });
+		overlay.addEventListener('touchstart', (e) => { e.stopPropagation(); }, { passive: false });
+		overlay.addEventListener('touchend',   (e) => { e.stopPropagation(); }, { passive: false });
+		overlay.addEventListener('touchmove',  (e) => { e.stopPropagation(); }, { passive: false });
+
+        const modal = document.createElement('div');
+        modal.style.cssText = `
+            background:var(--background-color2, #1e1e2e);
+            border:1px solid var(--separator-color);
+            border-radius:10px; padding:18px; width:660px; max-width:95vw;
+            max-height:90vh; overflow-y:auto; display:flex; flex-direction:column; gap:10px;
+            box-shadow:0 8px 32px rgba(0,0,0,0.5);`;
+        if (this.explorerSettings.lightTheme) modal.classList.add('wifm-light-theme');
+		
+        const row = (labelText, el) => {
+            const d = document.createElement('div');
+            d.style.cssText = 'display:flex; flex-direction:column; gap:3px;';
+            const lbl = document.createElement('small');
+            lbl.textContent = labelText;
+            lbl.style.opacity = '0.7';
+            d.appendChild(lbl);
+            d.appendChild(el);
+            return d;
+        };
+        const makeInput = (type, value, style='') => {
+            const el = document.createElement('input');
+            el.type = type; el.value = value ?? '';
+            el.className = 'text_pole margin0';
+            el.style.cssText = style;
+            return el;
+        };
+        const makeTextarea = (value, rows=6) => {
+            const el = document.createElement('textarea');
+            el.value = value ?? ''; el.rows = rows;
+            el.className = 'text_pole';
+            el.style.width = '100%';
+            return el;
+        };
+        const makeSelect = (options, currentVal) => {
+            const el = document.createElement('select');
+            el.className = 'text_pole widthNatural margin0';
+            options.forEach(([v, t]) => {
+                const o = document.createElement('option');
+                o.value = v; o.textContent = t;
+                if (String(v) === String(currentVal)) o.selected = true;
+                el.appendChild(o);
+            });
+            return el;
+        };
+
+        // ── 데이터에서 직접 값 읽기 ──
+        let stateVal = 'normal';
+        if (entryData.constant)   stateVal = 'constant';
+        if (entryData.vectorized) stateVal = 'vectorized';
+        if (entryData.disable)    stateVal = 'disabled';
+
+        // position: position 숫자값 + role 조합
+        let posVal = String(entryData.position ?? 0);
+        // @D 계열(position=4)은 role로 구분, 일단 숫자만 처리
+        const posOptions = [
+            ['0','↑Char'],['1','↓Char'],['5','↑EM'],['6','↓EM'],
+            ['2','↑AN'],['3','↓AN'],['4','@D ⚙️ (sys)']
+        ];
+
+        const fMemo    = makeInput('text', entryData.comment ?? '', 'width:100%');
+        const fKeys    = makeTextarea((entryData.key ?? []).join(', '), 2);
+        const fKeySec  = makeTextarea((entryData.keysecondary ?? []).join(', '), 2);
+        const fContent = makeTextarea(entryData.content ?? '', 8);
+        const fState   = makeSelect([
+            ['constant','🔵 Constant'],
+            ['normal','🟢 Normal'],
+            ['vectorized','🔗 Vectorized'],
+            ['disabled','⛔ Disabled'],
+        ], stateVal);
+        const fPos     = makeSelect(posOptions, posVal);
+        const fOrder   = makeInput('number', entryData.order ?? 100);
+        const fProb    = makeInput('number', entryData.probability ?? 100);
+
+        const fCaseSens = makeSelect([['null','Use global'],['true','Yes'],['false','No']], String(entryData.caseSensitive));
+        const fWholeW   = makeSelect([['null','Use global'],['true','Yes'],['false','No']], String(entryData.matchWholeWords));
+        const fGroupSc  = makeSelect([['null','Use global'],['true','Yes'],['false','No']], String(entryData.useGroupScoring));
+
+        // title
+        const titleDiv = document.createElement('div');
+        titleDiv.style.cssText = 'font-weight:bold; font-size:1.05em; margin-bottom:4px; display:flex; justify-content:space-between; align-items:center;';
+        titleDiv.innerHTML = `<span><i class="fa-solid fa-pen-to-square" style="margin-right:6px; opacity:0.7;"></i>수정 모드 — UID: ${uid}</span>`;
+        const closeX = document.createElement('span');
+        closeX.innerHTML = '✕';
+        closeX.style.cssText = 'cursor:pointer; opacity:0.6; font-size:1.1em;';
+        closeX.onclick = () => overlay.remove();
+        titleDiv.appendChild(closeX);
+
+        modal.appendChild(titleDiv);
+        modal.appendChild(row('Title / Memo', fMemo));
+        modal.appendChild(row('Primary Keywords (comma separated)', fKeys));
+        modal.appendChild(row('Optional Filter (comma separated)', fKeySec));
+        modal.appendChild(row('Content', fContent));
+
+        const rowGrid = document.createElement('div');
+        rowGrid.style.cssText = 'display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px;';
+        rowGrid.appendChild(row('State', fState));
+        rowGrid.appendChild(row('Position', fPos));
+        rowGrid.appendChild(row('Order', fOrder));
+        modal.appendChild(rowGrid);
+
+        const rowGrid2 = document.createElement('div');
+        rowGrid2.style.cssText = 'display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:8px;';
+        rowGrid2.appendChild(row('Probability %', fProb));
+        rowGrid2.appendChild(row('Case Sensitive', fCaseSens));
+        rowGrid2.appendChild(row('Whole Words', fWholeW));
+        rowGrid2.appendChild(row('Group Scoring', fGroupSc));
+        modal.appendChild(rowGrid2);
+
+        // ── Apply 버튼 ──
+        const btnRow = document.createElement('div');
+        btnRow.style.cssText = 'display:flex; gap:8px; margin-top:6px;';
+
+        const applyBtn = document.createElement('button');
+        applyBtn.className = 'menu_button greenBG';
+        applyBtn.style.cssText = 'flex:1; height:34px;';
+        applyBtn.innerHTML = '<i class="fa-solid fa-check"></i> 변경사항 적용';
+
+        const cancelBtn = document.createElement('button');
+        cancelBtn.className = 'menu_button redWarningBG';
+        cancelBtn.style.cssText = 'height:34px; padding:0 16px; display:inline-flex; align-items:center; justify-content:center; gap:6px; white-space:nowrap; flex-shrink:0;';
+        cancelBtn.innerHTML = '<i class="fa-solid fa-xmark"></i> 취소';
+
+        applyBtn.onclick = async () => {
+            applyBtn.disabled = true;
+            applyBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 저장 중...';
+
+            const parseKeys = (str) => str.split(',').map(s => s.trim()).filter(Boolean);
+
+            const newState = fState.value;
+            const newConstant   = newState === 'constant';
+            const newVectorized = newState === 'vectorized';
+            const newDisable    = newState === 'disabled';
+
+            const parseTriState = (str) => str === 'null' ? null : str === 'true';
+
+            const updatedEntry = {
+                ...entryData,
+                comment:         fMemo.value,
+                key:             parseKeys(fKeys.value),
+                keysecondary:    parseKeys(fKeySec.value),
+                content:         fContent.value,
+                constant:        newConstant,
+                vectorized:      newVectorized,
+                disable:         newDisable,
+                position:        parseInt(fPos.value),
+                order:           parseInt(fOrder.value) || 0,
+                probability:     parseInt(fProb.value) ?? 100,
+                caseSensitive:   parseTriState(fCaseSens.value),
+                matchWholeWords: parseTriState(fWholeW.value),
+                useGroupScoring: parseTriState(fGroupSc.value),
+            };
+
+            const updatedData = {
+                ...wiData,
+                entries: {
+                    ...wiData.entries,
+                    [uidStr]: updatedEntry,
+                }
+            };
+
+            try {
+                const resp = await fetch('/api/worldinfo/edit', {
+                    method: 'POST',
+                    headers: await this._getSTHeaders(),
+                    body: JSON.stringify({ name: lorebookName, data: updatedData }),
+                });
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+
+                // 저장 전 열려있던 entry uid 목록 기억
+                const openUids = new Set();
+                document.querySelectorAll('#world_popup_entries_list .world_entry[uid]').forEach(el => {
+                    const content = el.querySelector('.inline-drawer-content');
+                    if (content && content.style.display !== 'none') {
+                        openUids.add(el.getAttribute('uid'));
+                    }
+                });
+
+                worldInfoCache.delete(lorebookName);
+                overlay.remove();
+                await showWorldEditor(lorebookName);
+
+                // 재렌더 후 원래 열려있던 entry 다시 열기
+                if (openUids.size > 0) {
+                    await new Promise(resolve => {
+                        const list = document.getElementById('world_popup_entries_list');
+                        if (!list) return resolve();
+
+                        const tryRestore = () => {
+                            const allEntries = list.querySelectorAll('.world_entry[uid]');
+                            if (allEntries.length === 0) return false;
+                            allEntries.forEach(el => {
+                                if (openUids.has(el.getAttribute('uid'))) {
+                                    const content = el.querySelector('.inline-drawer-content');
+                                    const icon    = el.querySelector('.inline-drawer-icon');
+                                    if (content && content.style.display === 'none' && icon) {
+                                        icon.click();
+                                    }
+                                }
+                            });
+                            return true;
+                        };
+
+                        if (tryRestore()) return resolve();
+
+                        const observer = new MutationObserver(() => {
+                            if (tryRestore()) {
+                                observer.disconnect();
+                                resolve();
+                            }
+                        });
+                        observer.observe(list, { childList: true, subtree: true });
+
+                        setTimeout(() => { observer.disconnect(); resolve(); }, 3000);
+                    });
+                }
+
+            } catch(e) {
+                logger.error('저장 실패:', e);
+                alert('저장 실패: ' + e.message);
+                applyBtn.disabled = false;
+                applyBtn.innerHTML = '<i class="fa-solid fa-check"></i> 변경사항 적용';
+            }
+        };
+        cancelBtn.onclick = () => overlay.remove();
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+        btnRow.appendChild(applyBtn);
+        btnRow.appendChild(cancelBtn);
+        modal.appendChild(btnRow);
+        overlay.appendChild(modal);
+        document.body.appendChild(overlay);
+    },
+
+    // Title/Memo 추출 및 재삽입
+    openTitleExportModal: function() {
+        const entries = Array.from(
+            document.querySelectorAll('#world_popup_entries_list .world_entry[uid]')
+        );
+        if (!entries.length) return alert('로드된 entry가 없습니다.');
+
+        const titles = entries.map(e => {
+            const ta = e.querySelector('textarea[name="comment"]');
+            return ta ? ta.value : '';
+        });
+
+        const existing = document.getElementById('wifm-title-modal');
+        if (existing) existing.remove();
+
+        const overlay = document.createElement('div');
+        overlay.id = 'wifm-title-modal';
+        overlay.style.cssText = 'position:fixed; inset:0; z-index:9999; background:rgba(0,0,0,0.55); display:flex; align-items:center; justify-content:center;';
+		overlay.addEventListener('mousedown',  (e) => { e.stopPropagation(); });
+		overlay.addEventListener('click',      (e) => { e.stopPropagation(); });
+		overlay.addEventListener('touchstart', (e) => { e.stopPropagation(); }, { passive: false });
+		overlay.addEventListener('touchend',   (e) => { e.stopPropagation(); }, { passive: false });
+		overlay.addEventListener('touchmove',  (e) => { e.stopPropagation(); }, { passive: false });
+
+        const modal = document.createElement('div');
+        modal.style.cssText = `
+            background:var(--background-color2, #1e1e2e);
+            border:1px solid var(--separator-color);
+            border-radius:10px; padding:18px; width:560px; max-width:95vw;
+            max-height:85vh; display:flex; flex-direction:column; gap:10px;
+            box-shadow:0 8px 32px rgba(0,0,0,0.5);`;
+        if (this.explorerSettings.lightTheme) modal.classList.add('wifm-light-theme');
+
+        modal.innerHTML = `
+            <div style="font-weight:bold; font-size:1.05em; display:flex; justify-content:space-between; align-items:center;">
+                <span><i class="fa-solid fa-file-lines" style="margin-right:6px; opacity:0.7;"></i>Entry Title 추출 / 재삽입</span>
+                <span id="wifm-title-modal-close" style="cursor:pointer; opacity:0.6;">✕</span>
+            </div>
+            <small style="opacity:0.65;">한 줄 = entry 하나입니다. 줄 수를 바꾸지 마세요. 번역 후 붙여넣고 적용하면 됩니다.</small>
+            <div style="display:flex; gap:6px;">
+                <button id="wifm-title-download-btn" class="menu_button" style="flex:1; height:30px;">
+                    <i class="fa-solid fa-download"></i> TXT 다운로드
+                </button>
+                <button id="wifm-title-apply-btn" class="menu_button greenBG" style="flex:1; height:30px;">
+                    <i class="fa-solid fa-check"></i> 적용 (${titles.length}개)
+                </button>
+            </div>
+            <textarea id="wifm-title-textarea" class="text_pole" style="flex:1; min-height:350px; font-family:monospace; font-size:0.88em; white-space:pre;"></textarea>
+        `;
+        overlay.appendChild(modal);
+        document.body.appendChild(overlay);
+
+        const ta = modal.querySelector('#wifm-title-textarea');
+        ta.value = titles.join('\n');
+
+        modal.querySelector('#wifm-title-modal-close').onclick = () => overlay.remove();
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+        modal.querySelector('#wifm-title-download-btn').onclick = () => {
+            const lorebookName = this._currentWorldName || 'titles';
+            const blob = new Blob([ta.value], { type: 'text/plain;charset=utf-8' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = `${lorebookName}_titles.txt`;
+            a.click();
+            URL.revokeObjectURL(a.href);
+        };
+
+        modal.querySelector('#wifm-title-apply-btn').onclick = () => {
+            const lines = ta.value.split('\n');
+            if (lines.length !== entries.length) {
+                return alert(`줄 수 불일치!\n원본: ${entries.length}줄 / 현재: ${lines.length}줄\n줄 수를 맞춰주세요.`);
+            }
+            entries.forEach((entryEl, i) => {
+                const field = entryEl.querySelector('textarea[name="comment"]');
+                if (!field) return;
+                field.value = lines[i];
+                field.dispatchEvent(new Event('input', { bubbles: true }));
+                field.dispatchEvent(new Event('change', { bubbles: true }));
+            });
+            overlay.remove();
+            alert(`${entries.length}개 title 적용 완료.`);
+        };
+    },
+
+    // 일괄 설정 변경
+    openBulkSettingsModal: function() {
+        const entries = Array.from(
+            document.querySelectorAll('#world_popup_entries_list .world_entry[uid]')
+        );
+        if (!entries.length) return alert('로드된 entry가 없습니다.');
+
+        const existing = document.getElementById('wifm-bulk-modal');
+        if (existing) existing.remove();
+
+        const overlay = document.createElement('div');
+        overlay.id = 'wifm-bulk-modal';
+        overlay.style.cssText = 'position:fixed; inset:0; z-index:9999; background:rgba(0,0,0,0.55); display:flex; align-items:center; justify-content:center;';
+		overlay.addEventListener('mousedown',  (e) => { e.stopPropagation(); });
+		overlay.addEventListener('click',      (e) => { e.stopPropagation(); });
+		overlay.addEventListener('touchstart', (e) => { e.stopPropagation(); }, { passive: false });
+		overlay.addEventListener('touchend',   (e) => { e.stopPropagation(); }, { passive: false });
+		overlay.addEventListener('touchmove',  (e) => { e.stopPropagation(); }, { passive: false });
+
+
+        const modal = document.createElement('div');
+        modal.style.cssText = `
+            background:var(--background-color2, #1e1e2e);
+            border:1px solid var(--separator-color);
+            border-radius:10px; padding:18px; width:460px; max-width:95vw;
+            display:flex; flex-direction:column; gap:12px;
+            box-shadow:0 8px 32px rgba(0,0,0,0.5);`;
+        if (this.explorerSettings.lightTheme) modal.classList.add('wifm-light-theme');
+
+        const opts3 = `<option value="__skip__">-- 변경 안 함 --</option><option value="null">Use global</option><option value="true">Yes</option><option value="false">No</option>`;
+        const stateOpts = `<option value="__skip__">-- 변경 안 함 --</option><option value="constant">🔵 Constant</option><option value="normal">🟢 Normal</option><option value="vectorized">🔗 Vectorized</option>`;
+
+        modal.innerHTML = `
+            <div style="font-weight:bold; font-size:1.05em; display:flex; justify-content:space-between; align-items:center;">
+                <span><i class="fa-solid fa-sliders" style="margin-right:6px; opacity:0.7;"></i>일괄 설정 변경</span>
+                <span id="wifm-bulk-close" style="cursor:pointer; opacity:0.6;">✕</span>
+            </div>
+            <small style="opacity:0.65;">"변경 안 함"으로 두면 해당 항목은 그대로 유지됩니다.<br> 토글이 열려있는 엔트리에만 설정이 반영됩니다.</small>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                <div style="display:flex; flex-direction:column; gap:3px;">
+                    <small style="opacity:0.7;">State</small>
+                    <select id="wifm-bulk-state" class="text_pole margin0">${stateOpts}</select>
+                </div>
+                <div style="display:flex; flex-direction:column; gap:3px;">
+                    <small style="opacity:0.7;">Case Sensitive</small>
+                    <select id="wifm-bulk-case" class="text_pole margin0">${opts3}</select>
+                </div>
+                <div style="display:flex; flex-direction:column; gap:3px;">
+                    <small style="opacity:0.7;">Whole Words</small>
+                    <select id="wifm-bulk-whole" class="text_pole margin0">${opts3}</select>
+                </div>
+                <div style="display:flex; flex-direction:column; gap:3px;">
+                    <small style="opacity:0.7;">Group Scoring</small>
+                    <select id="wifm-bulk-group" class="text_pole margin0">${opts3}</select>
+                </div>
+                <div style="display:flex; flex-direction:column; gap:3px;">
+                    <small style="opacity:0.7;">Position</small>
+                    <select id="wifm-bulk-position" class="text_pole margin0">
+                        <option value="__skip__">-- 변경 안 함 --</option>
+                        <option value="0">↑Char</option><option value="1">↓Char</option>
+                        <option value="5">↑EM</option><option value="6">↓EM</option>
+                        <option value="2">↑AN</option><option value="3">↓AN</option>
+                    </select>
+                </div>
+                <div style="display:flex; flex-direction:column; gap:3px;">
+                    <small style="opacity:0.7;">Order (빈칸=변경안함)</small>
+                    <input id="wifm-bulk-order" type="number" class="text_pole margin0" placeholder="변경 안 함" min="0" max="9999">
+                </div>
+            </div>
+            <div id="wifm-bulk-preview" style="font-size:0.8em; opacity:0.6; min-height:16px;"></div>
+            <div style="display:flex; gap:8px;">
+                <button id="wifm-bulk-apply" class="menu_button greenBG" style="flex:1; height:34px;">
+                    <i class="fa-solid fa-check"></i> 적용
+                </button>
+            </div>
+        `;
+
+        overlay.appendChild(modal);
+        document.body.appendChild(overlay);
+
+        modal.querySelector('#wifm-bulk-close').onclick = () => overlay.remove();
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+        const applyField = (entryEl, sel, newVal) => {
+            const el = entryEl.querySelector(sel);
+            if (!el || newVal === '__skip__' || newVal === '') return;
+            el.value = newVal;
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+        };
+
+        modal.querySelector('#wifm-bulk-apply').onclick = () => {
+            const bState    = modal.querySelector('#wifm-bulk-state').value;
+            const bCase     = modal.querySelector('#wifm-bulk-case').value;
+            const bWhole    = modal.querySelector('#wifm-bulk-whole').value;
+            const bGroup    = modal.querySelector('#wifm-bulk-group').value;
+            const bPos      = modal.querySelector('#wifm-bulk-position').value;
+            const bOrder    = modal.querySelector('#wifm-bulk-order').value;
+
+            const changes = [bState, bCase, bWhole, bGroup, bPos, bOrder].filter(v => v && v !== '__skip__');
+            if (!changes.length) return alert('변경할 항목을 선택해주세요.');
+            if (!confirm(`${entries.length}개 entry 중 현재 열려있는 entry에만 적용됩니다. 계속하시겠습니까?`)) return;
+
+            entries.forEach(entryEl => {
+                applyField(entryEl, 'select[name="entryStateSelector"]', bState);
+                applyField(entryEl, 'select[name="caseSensitive"]',      bCase);
+                applyField(entryEl, 'select[name="matchWholeWords"]',    bWhole);
+                applyField(entryEl, 'select[name="useGroupScoring"]',    bGroup);
+                applyField(entryEl, 'select[name="position"]',           bPos);
+                applyField(entryEl, 'input[name="order"]',               bOrder);
+            });
+            overlay.remove();
+            alert(`열려있는 entry에 적용 완료.`);
+        };
     },
 
     enhanceWorldInfoPopup: function(dialog) {
