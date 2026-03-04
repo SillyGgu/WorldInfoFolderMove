@@ -620,14 +620,10 @@ const WorldInfoFolderMove = {
 				} else {
 					await this.loadLorebook(item.name);
 					const searchInput = document.getElementById('wifm-explorer-search');
-					if (searchInput && searchInput.value.trim() !== '') {
-						const ownerFolder = this.findFolderForLorebook(item.name);
-						if (ownerFolder) {
-							this._currentPath = [ownerFolder];
-							searchInput.value = '';
-							this.renderExplorerView();
-						}
-					}
+					const ownerFolder = this.findFolderForLorebook(item.name) || 'Unassigned';
+					if (searchInput) searchInput.value = '';
+					this._currentPath = [ownerFolder];
+					this.renderExplorerView();
 				}
 			});
 
