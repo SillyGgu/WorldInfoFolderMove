@@ -967,7 +967,7 @@ const WorldInfoFolderMove = {
         modal.style.cssText = `
             background:var(--background-color2, #1e1e2e);
             border:1px solid var(--separator-color);
-            border-radius:10px; padding:18px; width:660px; max-width:95vw;
+            border-radius:10px; padding:18px; width:820px; max-width:95vw;
             max-height:90vh; overflow-y:auto; display:flex; flex-direction:column; gap:10px;
             box-shadow:0 8px 32px rgba(0,0,0,0.5);`;
         if (this.explorerSettings.lightTheme) modal.classList.add('wifm-light-theme');
@@ -1187,7 +1187,6 @@ const WorldInfoFolderMove = {
             }
         };
         cancelBtn.onclick = () => overlay.remove();
-        overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
 
         btnRow.appendChild(applyBtn);
         btnRow.appendChild(cancelBtn);
@@ -1224,7 +1223,7 @@ const WorldInfoFolderMove = {
         modal.style.cssText = `
             background:var(--background-color2, #1e1e2e);
             border:1px solid var(--separator-color);
-            border-radius:10px; padding:18px; width:560px; max-width:95vw;
+            border-radius:10px; padding:18px; width:780px; max-width:95vw;
             max-height:85vh; display:flex; flex-direction:column; gap:10px;
             box-shadow:0 8px 32px rgba(0,0,0,0.5);`;
         if (this.explorerSettings.lightTheme) modal.classList.add('wifm-light-theme');
@@ -1252,7 +1251,6 @@ const WorldInfoFolderMove = {
         ta.value = titles.join('\n');
 
         modal.querySelector('#wifm-title-modal-close').onclick = () => overlay.remove();
-        overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
 
         modal.querySelector('#wifm-title-download-btn').onclick = () => {
             const lorebookName = this._currentWorldName || 'titles';
@@ -1362,7 +1360,6 @@ const WorldInfoFolderMove = {
         document.body.appendChild(overlay);
 
         modal.querySelector('#wifm-bulk-close').onclick = () => overlay.remove();
-        overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
 
         const applyField = (entryEl, sel, newVal) => {
             const el = entryEl.querySelector(sel);
