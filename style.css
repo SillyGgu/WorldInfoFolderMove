@@ -790,3 +790,201 @@ box-sizing: border-box;
         box-sizing: border-box !important;
     }
 }
+
+/* ─── Pinned items ─── */
+
+.wifm-pinned .wifm-item-icon {
+    color: #f0a030 !important;
+    filter: drop-shadow(0 1px 4px rgba(240,160,48,0.5)) !important;
+}
+
+.wifm-pin-badge {
+    position: absolute;
+    top: 3px;
+    right: 4px;
+    font-size: 9px;
+    color: #f0a030;
+    opacity: 0.9;
+    pointer-events: none;
+}
+
+/* ─── Context Menu ─── */
+
+.wifm-context-menu {
+    position: fixed;
+    z-index: 99999;
+    min-width: 160px;
+    background: var(--smart-context-bg, #1e1f22);
+    border: 1px solid var(--separator-color, rgba(255,255,255,0.12));
+    border-radius: 8px;
+    box-shadow: 0 8px 28px rgba(0,0,0,0.6), 0 2px 8px rgba(0,0,0,0.3);
+    padding: 4px;
+    overflow: hidden;
+    animation: wifm-ctx-in 0.1s ease;
+}
+
+@keyframes wifm-ctx-in {
+    from { opacity: 0; transform: scale(0.95) translateY(-4px); }
+    to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.wifm-context-item {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 7px 12px;
+    border-radius: 5px;
+    font-size: 0.88em;
+    cursor: pointer;
+    color: var(--text_color);
+    transition: background-color 0.1s;
+    white-space: nowrap;
+    user-select: none;
+}
+
+.wifm-context-item:hover {
+    background-color: rgba(255,255,255,0.1);
+}
+
+.wifm-context-item i {
+    width: 14px;
+    text-align: center;
+    opacity: 0.75;
+    flex-shrink: 0;
+}
+
+.wifm-context-item.wifm-context-active {
+    color: #f0a030;
+}
+
+.wifm-context-item.wifm-context-active i {
+    opacity: 1;
+}
+
+.wifm-context-item.wifm-context-danger {
+    color: #e05555;
+}
+
+.wifm-context-item.wifm-context-danger:hover {
+    background-color: rgba(220,60,60,0.15);
+}
+
+.wifm-context-sep {
+    height: 1px;
+    background: var(--separator-color, rgba(255,255,255,0.1));
+    margin: 3px 4px;
+}
+
+/* light theme 대응 */
+#wifm-folder-explorer-window.wifm-light-theme ~ .wifm-context-menu,
+.wifm-light-theme .wifm-context-menu,
+body.wifm-theme-light .wifm-context-menu {
+    background: #f4f4f4;
+    border-color: #ccc;
+    color: #333;
+}
+
+body.wifm-theme-light .wifm-context-item {
+    color: #333;
+}
+
+body.wifm-theme-light .wifm-context-item:hover {
+    background-color: rgba(0,0,0,0.08);
+}
+
+body.wifm-theme-light .wifm-context-item i {
+    color: #555;
+}
+
+body.wifm-theme-light .wifm-context-item.wifm-context-active {
+    color: #c07800;
+}
+
+body.wifm-theme-light .wifm-context-item.wifm-context-danger {
+    color: #cc2222;
+}
+
+body.wifm-theme-light .wifm-context-item.wifm-context-danger:hover {
+    background-color: rgba(200,0,0,0.1);
+}
+
+body.wifm-theme-light .wifm-context-sep {
+    background: rgba(0,0,0,0.12);
+}
+
+/* ─── More Button (⋯) ─── */
+
+.wifm-more-btn {
+    position: absolute;
+    top: 3px;
+    right: 3px;
+    width: 20px;
+    height: 20px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    opacity: 0;
+    pointer-events: none;
+    background: rgba(0,0,0,0.45);
+    color: rgba(255,255,255,0.85);
+    transition: opacity 0.15s, background-color 0.15s;
+    z-index: 11;
+}
+
+.wifm-explorer-item:hover .wifm-more-btn {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.wifm-more-btn:hover {
+    background: rgba(255,255,255,0.2);
+    color: #fff;
+}
+
+@media (hover: none) {
+    .wifm-more-btn {
+        opacity: 0.45;
+        pointer-events: auto;
+    }
+}
+
+.wifm-pinned .wifm-pin-badge {
+    right: auto;
+    left: 4px;
+    top: 3px;
+}
+
+body.wifm-theme-light #wifm-edit-modal > div,
+body.wifm-theme-light #wifm-title-modal > div,
+body.wifm-theme-light #wifm-bulk-modal > div {
+    background-color: #f2f2f2 !important;
+    color: #333 !important;
+    border-color: #ccc !important;
+}
+
+body.wifm-theme-light #wifm-edit-modal > div small,
+body.wifm-theme-light #wifm-title-modal > div small,
+body.wifm-theme-light #wifm-bulk-modal > div small {
+    color: #555;
+}
+
+body.wifm-theme-light #wifm-edit-modal > div .text_pole,
+body.wifm-theme-light #wifm-title-modal > div .text_pole,
+body.wifm-theme-light #wifm-bulk-modal > div .text_pole {
+    background-color: #ffffff;
+    color: #333;
+    border-color: #ccc;
+}
+
+body.wifm-theme-light #wifm-edit-modal > div .menu_button,
+body.wifm-theme-light #wifm-title-modal > div .menu_button,
+body.wifm-theme-light #wifm-bulk-modal > div .menu_button {
+    color: #444;
+    background-color: rgba(0,0,0,0.08);
+}
+
+#wifm-world-info-redesign.wifm-light-theme {
+    color: #333;
+}

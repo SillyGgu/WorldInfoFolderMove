@@ -45,8 +45,6 @@ const WIFM_UI_HTML = `
 
         <div class="wifm-explorer-toolbar">
             <div id="wifm-world-info-new-folder" class="menu_button menu_button_icon fa-solid fa-folder-plus interactable" title="New Folder"></div>
-            <div id="wifm-world-info-delete-folder" class="menu_button menu_button_icon fa-solid fa-folder-minus interactable" title="Delete Current Folder"></div>
-            <div class="wifm-toolbar-sep"></div>
             <div class="wifm-toolbar-sep"></div>
             <div id="wifm-move-toggle-button" class="menu_button menu_button_icon fa-solid fa-arrows-up-down-left-right interactable" title="Move Mode"></div>
             <div id="wifm-move-actions" style="display:none; align-items:center; gap:4px;">
@@ -146,6 +144,7 @@ const WorldInfoFolderMove = {
     _selectedItems: new Set(),
     _uiInjected: false,
     _isDeselecting: false,
+    _isRenaming: false,
     _listenersRegistered: false,
     _entryObserver: null,
     _csrfToken: null,
@@ -231,7 +230,41 @@ const WorldInfoFolderMove = {
         };
 
         routeClick('wifm-world-info-entry-new',        'world_popup_new');
-        routeClick('wifm-world-info-entry-rename',     'world_popup_name_button');
+        const renameBtn = document.getElementById('wifm-world-info-entry-rename');
+        const originalRenameBtn = document.getElementById('world_popup_name_button');
+        if (renameBtn && originalRenameBtn) {
+            renameBtn.addEventListener('click', () => {
+                const oldName = WorldInfoFolderMove._currentWorldName;
+                originalRenameBtn.click();
+
+                if (!oldName) return;
+
+                WorldInfoFolderMove._isRenaming = true;
+                let attempts = 0;
+                const poll = setInterval(() => {
+                    attempts++;
+                    const afterNames = world_names || [];
+                    const oldGone = !afterNames.includes(oldName);
+
+                    if (oldGone) {
+                        clearInterval(poll);
+                        const sel = document.getElementById('world_editor_select');
+                        const opt = sel ? sel.options[sel.selectedIndex] : null;
+                        const newName = (opt && opt.value !== '' && !opt.text.includes('Pick to Edit')) ? opt.text : null;
+                        if (newName && newName !== oldName) {
+                            WorldInfoFolderMove._handleLorebookRename(oldName, newName);
+                        } else {
+                            WorldInfoFolderMove._isRenaming = false;
+                            WorldInfoFolderMove.refreshLorebookUI();
+                        }
+                    } else if (attempts > 30) {
+                        clearInterval(poll);
+                        WorldInfoFolderMove._isRenaming = false;
+                        WorldInfoFolderMove.refreshLorebookUI();
+                    }
+                }, 100);
+            });
+        }
         routeClick('wifm-world-info-entry-duplicate',  'world_duplicate');
         routeClick('wifm-world-info-entry-export',     'world_popup_export');
         routeClick('wifm-world-info-entry-delete',     'world_popup_delete');
@@ -259,7 +292,8 @@ const WorldInfoFolderMove = {
         const originalEntrySearch = document.getElementById('world_info_search');
 
         if (searchToggleBtn && searchBarContainer) {
-            searchToggleBtn.addEventListener('click', () => {
+            searchToggleBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
                 const isHidden = searchBarContainer.style.display === 'none';
                 searchBarContainer.style.display = isHidden ? 'block' : 'none';
                 if (isHidden && wifmEntrySearch) wifmEntrySearch.focus();
@@ -268,6 +302,9 @@ const WorldInfoFolderMove = {
         if (wifmEntrySearch && originalEntrySearch) {
             wifmEntrySearch.addEventListener('input', () => {
                 originalEntrySearch.value = wifmEntrySearch.value;
+                // jQuery trigger + 네이티브 이벤트 둘 다 발생시켜 호환성 확보
+                originalEntrySearch.dispatchEvent(new Event('input', { bubbles: true }));
+                originalEntrySearch.dispatchEvent(new Event('change', { bubbles: true }));
                 $(originalEntrySearch).trigger('input');
             });
         }
@@ -366,7 +403,6 @@ const WorldInfoFolderMove = {
         document.getElementById('wifm-move-cancel-button').addEventListener('click', () => this.toggleMoveMode(false));
         document.getElementById('wifm-move-confirm-button').addEventListener('click', () => this.showFolderMovePopup());
         document.getElementById('wifm-world-info-new-folder').addEventListener('click', () => this.createNewFolder());
-        document.getElementById('wifm-world-info-delete-folder').addEventListener('click', () => this.deleteCurrentFolder());
 
         document.getElementById('wifm-world-info-new-button').addEventListener('click', () => {
             document.getElementById('world_create_button')?.click();
@@ -391,7 +427,10 @@ const WorldInfoFolderMove = {
 
         const explorerSearch = document.getElementById('wifm-explorer-search');
         if (explorerSearch) {
-            explorerSearch.addEventListener('input', debounce(() => this.renderExplorerView(explorerSearch.value), 300));
+            const self = this;
+            explorerSearch.addEventListener('input', debounce(function() {
+                self.renderExplorerView(explorerSearch.value || null);
+            }, 300));
         }
 
         if (!this._listenersRegistered) {
@@ -422,7 +461,9 @@ const WorldInfoFolderMove = {
                     }
                     this.updateGlobalButtonState();
                     this.updateActiveWorldInfoList();
-                    this.renderExplorerView();
+                    const searchInput = document.getElementById('wifm-explorer-search');
+                    const currentSearch = (searchInput && searchInput.value.trim() !== '') ? searchInput.value : null;
+                    this.renderExplorerView(currentSearch);
                 }, 100);
             });
         }
@@ -441,7 +482,9 @@ const WorldInfoFolderMove = {
                 }
                 WorldInfoFolderMove.updateGlobalButtonState();
                 WorldInfoFolderMove.updateActiveWorldInfoList();
-                WorldInfoFolderMove.renderExplorerView();
+                const searchInput = document.getElementById('wifm-explorer-search');
+                const currentSearch = (searchInput && searchInput.value.trim() !== '') ? searchInput.value : null;
+                WorldInfoFolderMove.renderExplorerView(currentSearch);
                 return result;
             };
             window.displayWorldEntries._wifmWrapped = true;
@@ -453,6 +496,7 @@ const WorldInfoFolderMove = {
         this.isExplorerOpen = forceState !== undefined ? forceState : !this.isExplorerOpen;
         if (this.isExplorerOpen) {
             win.classList.add('visible');
+            this.applyExplorerSettings();
             this.renderExplorerView();
         } else {
             win.classList.remove('visible');
@@ -461,6 +505,7 @@ const WorldInfoFolderMove = {
 
     refreshLorebookUI: function() {
         if (!this._uiInjected) return;
+        if (this._isRenaming) return;
         const searchInput = document.getElementById('wifm-explorer-search');
         const currentSearch = (searchInput && searchInput.value.trim() !== '') ? searchInput.value : null;
         this.renderExplorerView(currentSearch);
@@ -488,7 +533,6 @@ const WorldInfoFolderMove = {
         this.renderExplorerView();
         logger.log('Lorebook selection cleared.');
     },
-
     loadLorebook: async function(name) {
         try {
             await showWorldEditor(name);
@@ -496,7 +540,6 @@ const WorldInfoFolderMove = {
             this.updateSelectedLorebookName(name);
             this.updateGlobalButtonState();
             this.updateActiveWorldInfoList();
-            this.renderExplorerView();
         } catch (error) {
             logger.error('loadLorebook 오류:', error);
         }
@@ -508,12 +551,23 @@ const WorldInfoFolderMove = {
         const backBtn = document.getElementById('wifm-explorer-back-btn');
         if (!container) return;
 
-        const delBtn = document.getElementById('wifm-world-info-delete-folder');
-        if (delBtn) {
-            const currentFolder = this._currentPath.length > 0 ? this._currentPath[this._currentPath.length - 1] : null;
-            const isDeletable = currentFolder && currentFolder !== 'Unassigned';
-            delBtn.style.opacity = isDeletable ? '1' : '0.4';
-            delBtn.style.pointerEvents = isDeletable ? 'auto' : 'none';
+        const currentFolder = this._currentPath.length > 0 ? this._currentPath[this._currentPath.length - 1] : null;
+
+        const renameBtn = document.getElementById('wifm-world-info-rename-folder');
+        if (renameBtn) {
+            const isRenameable = currentFolder && currentFolder !== 'Unassigned';
+            renameBtn.style.display = isRenameable ? 'inline-flex' : 'none';
+        }
+
+        const pinBtn = document.getElementById('wifm-world-info-pin-folder');
+        if (pinBtn) {
+            const isPinnable = currentFolder && currentFolder !== 'Unassigned';
+            pinBtn.style.display = isPinnable ? 'inline-flex' : 'none';
+            if (isPinnable && this.folderState[currentFolder]) {
+                const isPinned = this.folderState[currentFolder].pinned;
+                pinBtn.classList.toggle('wifm-pin-active', isPinned);
+                pinBtn.title = isPinned ? 'Unpin Folder' : 'Pin Folder to Top';
+            }
         }
 
         container.innerHTML = '';
@@ -527,11 +581,19 @@ const WorldInfoFolderMove = {
 
         let items = [];
         const currentFolderName = this._currentPath.length > 0 ? this._currentPath[this._currentPath.length - 1] : 'root';
-        const allFolderNames = Object.keys(this.folderState).filter(n => n !== 'Unassigned').sort();
+
+        const allFolderNames = Object.keys(this.folderState)
+            .filter(n => n !== 'Unassigned')
+            .sort((a, b) => {
+                const ap = this.folderState[a]?.pinned ? 1 : 0;
+                const bp = this.folderState[b]?.pinned ? 1 : 0;
+                if (bp !== ap) return bp - ap;
+                return a.localeCompare(b);
+            });
 
         if (this._currentPath.length === 0 && !searchTerm) {
-            allFolderNames.forEach(fn => items.push({ type: 'folder', name: fn }));
-            items.push({ type: 'folder', name: 'Unassigned' });
+            allFolderNames.forEach(fn => items.push({ type: 'folder', name: fn, pinned: !!this.folderState[fn]?.pinned }));
+            items.push({ type: 'folder', name: 'Unassigned', pinned: false });
         }
 
         const allWiNames = world_names || [];
@@ -544,6 +606,8 @@ const WorldInfoFolderMove = {
             }
         }
 
+        const pinnedFileSet = this.pinnedFiles || new Set();
+        const matchedFiles = [];
         allWiNames.forEach(wiName => {
             const assignedFolder = lorebookFolderMap.get(wiName) || 'Unassigned';
             let shouldAdd = false;
@@ -553,8 +617,11 @@ const WorldInfoFolderMove = {
                 if (targetFolder === 'Unassigned' && assignedFolder === 'Unassigned') shouldAdd = true;
                 else if (targetFolder && targetFolder === assignedFolder) shouldAdd = true;
             }
-            if (shouldAdd) items.push({ type: 'file', name: wiName });
+            if (shouldAdd) matchedFiles.push({ type: 'file', name: wiName, pinned: pinnedFileSet.has(wiName) });
         });
+
+        matchedFiles.sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
+        items.push(...matchedFiles);
 
         const fragment = document.createDocumentFragment();
         items.forEach(item => {
@@ -562,6 +629,7 @@ const WorldInfoFolderMove = {
             el.className = 'wifm-explorer-item';
             el.dataset.type = item.type;
             el.dataset.name = item.name;
+            if (item.pinned) el.classList.add('wifm-pinned');
 
             if (this.isMoveMode && item.type === 'file') {
                 const cb = document.createElement('input');
@@ -576,6 +644,12 @@ const WorldInfoFolderMove = {
                     this.updateMoveActionsVisibility();
                 });
                 el.appendChild(cb);
+            }
+
+            if (item.pinned) {
+                const pinBadge = document.createElement('i');
+                pinBadge.className = 'fa-solid fa-thumbtack wifm-pin-badge';
+                el.appendChild(pinBadge);
             }
 
             const icon = document.createElement('div');
@@ -593,39 +667,61 @@ const WorldInfoFolderMove = {
             nameSpan.textContent = item.name;
             el.appendChild(nameSpan);
 
+            const moreBtn = document.createElement('div');
+            moreBtn.className = 'wifm-more-btn';
+            moreBtn.innerHTML = '<i class="fa-solid fa-ellipsis-vertical"></i>';
+            moreBtn.title = '옵션';
+            moreBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                WorldInfoFolderMove.showContextMenu(e, item);
+            });
+            el.appendChild(moreBtn);
+
+            let longPressTimer = null;
+            el.addEventListener('pointerdown', (e) => {
+                if (e.pointerType === 'touch') {
+                    longPressTimer = setTimeout(() => {
+                        WorldInfoFolderMove.showContextMenu(e, item);
+                    }, 500);
+                }
+            });
+            el.addEventListener('pointerup', () => { clearTimeout(longPressTimer); });
+            el.addEventListener('pointermove', () => { clearTimeout(longPressTimer); });
+            el.addEventListener('pointercancel', () => { clearTimeout(longPressTimer); });
             el.addEventListener('click', async (e) => {
-				e.preventDefault();
-				e.stopPropagation();
-				if (e.target.type === 'checkbox') return;
+                e.preventDefault();
+                e.stopPropagation();
+                if (e.target.type === 'checkbox') return;
 
-				if (this.isMoveMode) {
-					if (item.type === 'folder') {
-						this._currentPath.push(item.name);
-						this.renderExplorerView();
-					} else {
-						const cb = el.querySelector('input[type="checkbox"]');
-						if (cb) {
-							cb.checked = !cb.checked;
-							if (cb.checked) this._selectedItems.add(item.name);
-							else this._selectedItems.delete(item.name);
-							this.updateMoveActionsVisibility();
-						}
-					}
-					return;
-				}
+                if (this.isMoveMode) {
+                    if (item.type === 'folder') {
+                        this._currentPath.push(item.name);
+                        this.renderExplorerView();
+                    } else {
+                        const cb = el.querySelector('input[type="checkbox"]');
+                        if (cb) {
+                            cb.checked = !cb.checked;
+                            if (cb.checked) this._selectedItems.add(item.name);
+                            else this._selectedItems.delete(item.name);
+                            this.updateMoveActionsVisibility();
+                        }
+                    }
+                    return;
+                }
 
-				if (item.type === 'folder') {
-					this._currentPath.push(item.name);
-					this.renderExplorerView();
-				} else {
-					await this.loadLorebook(item.name);
-					const searchInput = document.getElementById('wifm-explorer-search');
-					const ownerFolder = this.findFolderForLorebook(item.name) || 'Unassigned';
-					if (searchInput) searchInput.value = '';
-					this._currentPath = [ownerFolder];
-					this.renderExplorerView();
-				}
-			});
+                if (item.type === 'folder') {
+                    this._currentPath.push(item.name);
+                    this.renderExplorerView();
+                } else {
+                    await this.loadLorebook(item.name);
+                    const searchInput = document.getElementById('wifm-explorer-search');
+                    const ownerFolder = this.findFolderForLorebook(item.name) || 'Unassigned';
+                    if (searchInput) searchInput.value = '';
+                    this._currentPath = [ownerFolder];
+                    this.renderExplorerView();
+                }
+            });
 
             fragment.appendChild(el);
         });
@@ -635,7 +731,7 @@ const WorldInfoFolderMove = {
             container.innerHTML = '<div style="grid-column:1/-1; text-align:center; padding:20px; opacity:0.6;">Empty</div>';
         }
     },
-
+	
     toggleCurrentGlobalStatus: function() {
         if (!this._currentWorldName) return;
         const worldInfoSelect = document.getElementById('world_info');
@@ -702,41 +798,62 @@ const WorldInfoFolderMove = {
         try {
             const state = accountStorage.getItem(this.storageKey);
             this.folderState = state ? JSON.parse(state) : {};
-            if (!this.folderState['Unassigned']) this.folderState['Unassigned'] = { isOpen: true, items: [] };
+            if (!this.folderState['Unassigned']) this.folderState['Unassigned'] = { isOpen: true, items: [], pinned: false };
+            for (const fn in this.folderState) {
+                if (this.folderState[fn].pinned === undefined) this.folderState[fn].pinned = false;
+                if (this.folderState[fn].pinnedItems) {
+                    delete this.folderState[fn].pinnedItems;
+                }
+            }
+            const pinnedFilesRaw = accountStorage.getItem('wifm-pinned-files');
+            this.pinnedFiles = pinnedFilesRaw ? new Set(JSON.parse(pinnedFilesRaw)) : new Set();
+
             const settings = accountStorage.getItem(this.settingsKey);
             if (settings) this.explorerSettings = { ...this.explorerSettings, ...JSON.parse(settings) };
         } catch (e) {
             this.folderState = {};
+            this.pinnedFiles = new Set();
             logger.error('폴더 상태 로드 오류', e);
         }
     },
-
     saveFolderState: function() {
         accountStorage.setItem(this.storageKey, JSON.stringify(this.folderState));
+    },
+    savePinnedFiles: function() {
+        accountStorage.setItem('wifm-pinned-files', JSON.stringify([...this.pinnedFiles]));
     },
 
     saveExplorerSettings: function() {
         accountStorage.setItem(this.settingsKey, JSON.stringify(this.explorerSettings));
     },
 
-        applyExplorerSettings: function() {
+    applyExplorerSettings: function() {
+        const isLight = this.explorerSettings.lightTheme;
+
         const win = document.getElementById('wifm-folder-explorer-window');
-        if (!win) return;
-        win.style.setProperty('--wifm-scale', this.explorerSettings.scale);
-        win.classList.toggle('wifm-light-theme', this.explorerSettings.lightTheme);
+        if (win) {
+            win.style.setProperty('--wifm-scale', this.explorerSettings.scale);
+            win.classList.toggle('wifm-light-theme', isLight);
+        }
+
+        const container = document.getElementById('wifm-world-info-redesign');
+        if (container) container.classList.toggle('wifm-light-theme', isLight);
+
         const scaleInput = document.getElementById('wifm-setting-scale-input');
         const scaleVal   = document.getElementById('wifm-setting-scale-val');
         const themeInput = document.getElementById('wifm-setting-theme-input');
         if (scaleInput) scaleInput.value = this.explorerSettings.scale;
         if (scaleVal)   scaleVal.textContent = this.explorerSettings.scale + 'x';
-        if (themeInput) themeInput.checked = this.explorerSettings.lightTheme;
+        if (themeInput) themeInput.checked = isLight;
 
         ['wifm-edit-modal', 'wifm-title-modal', 'wifm-bulk-modal'].forEach(id => {
             const overlay = document.getElementById(id);
             if (!overlay) return;
             const modal = overlay.querySelector('div');
-            if (modal) modal.classList.toggle('wifm-light-theme', this.explorerSettings.lightTheme);
+            if (modal) modal.classList.toggle('wifm-light-theme', isLight);
         });
+
+        document.body.classList.toggle('wifm-theme-light', isLight);
     },
 
     toggleSettingsView: function(forceState) {
@@ -763,7 +880,7 @@ const WorldInfoFolderMove = {
         if (folderName && folderName.trim()) {
             const trimmed = folderName.trim();
             if (this.folderState[trimmed]) return alert('이미 존재함');
-            this.folderState[trimmed] = { isOpen: true, items: [] };
+            this.folderState[trimmed] = { isOpen: true, items: [], pinned: false };
             this.saveFolderState();
             this.refreshLorebookUI();
         }
@@ -786,7 +903,119 @@ const WorldInfoFolderMove = {
             this.refreshLorebookUI();
         }
     },
+    renameFolder: function(folderName) {
+        if (!folderName || folderName === 'Unassigned') return alert("'Unassigned' 폴더는 이름을 변경할 수 없습니다.");
+        const newName = prompt('새 폴더 이름:', folderName);
+        if (!newName || !newName.trim()) return;
+        const trimmed = newName.trim();
+        if (trimmed === folderName) return;
+        if (this.folderState[trimmed]) return alert('같은 이름의 폴더가 이미 존재합니다.');
+        this.folderState[trimmed] = { ...this.folderState[folderName] };
+        delete this.folderState[folderName];
+        const idx = this._currentPath.indexOf(folderName);
+        if (idx > -1) this._currentPath[idx] = trimmed;
+        this.saveFolderState();
+        this.refreshLorebookUI();
+    },
 
+    deleteFolder: function(folderName) {
+        if (!folderName || folderName === 'Unassigned') return alert("'Unassigned' 폴더는 삭제할 수 없습니다.");
+        if (!confirm(`폴더 '${folderName}'를 삭제하시겠습니까?\n\n포함된 월드 인포는 'Unassigned' 폴더로 이동됩니다.`)) return;
+        const itemsToMove = this.folderState[folderName]?.items || [];
+        if (!this.folderState['Unassigned']) this.folderState['Unassigned'] = { isOpen: true, items: [], pinned: false, pinnedItems: [] };
+        itemsToMove.forEach(item => {
+            if (!this.folderState['Unassigned'].items.includes(item))
+                this.folderState['Unassigned'].items.push(item);
+        });
+        delete this.folderState[folderName];
+        const idx = this._currentPath.indexOf(folderName);
+        if (idx > -1) this._currentPath.splice(idx);
+        this.saveFolderState();
+        this.refreshLorebookUI();
+    },
+
+    togglePinFolder: function(folderName) {
+        if (!folderName || folderName === 'Unassigned') return;
+        if (!this.folderState[folderName]) return;
+        this.folderState[folderName].pinned = !this.folderState[folderName].pinned;
+        this.saveFolderState();
+        this.renderExplorerView();
+    },
+
+    togglePinFile: function(fileName) {
+        if (!this.pinnedFiles) this.pinnedFiles = new Set();
+        if (this.pinnedFiles.has(fileName)) this.pinnedFiles.delete(fileName);
+        else this.pinnedFiles.add(fileName);
+        this.savePinnedFiles();
+        this.renderExplorerView();
+    },
+    showContextMenu: function(e, item) {
+        document.getElementById('wifm-context-menu')?.remove();
+
+        const menu = document.createElement('div');
+        menu.id = 'wifm-context-menu';
+        menu.className = 'wifm-context-menu';
+
+        const addItem = (icon, label, onClick, extraClass = '') => {
+            const row = document.createElement('div');
+            row.className = 'wifm-context-item' + (extraClass ? ' ' + extraClass : '');
+            row.innerHTML = `<i class="fa-solid ${icon}"></i><span>${label}</span>`;
+            row.addEventListener('click', (ev) => { ev.stopPropagation(); menu.remove(); onClick(); });
+            menu.appendChild(row);
+        };
+
+        if (item.type === 'folder') {
+            const isPinned = !!this.folderState[item.name]?.pinned;
+            addItem('fa-thumbtack', isPinned ? '핀 고정 해제' : '상단 고정', () => this.togglePinFolder(item.name), isPinned ? 'wifm-context-active' : '');
+            if (item.name !== 'Unassigned') {
+                menu.appendChild(Object.assign(document.createElement('div'), { className: 'wifm-context-sep' }));
+                addItem('fa-pen', '이름 변경', () => this.renameFolder(item.name));
+                addItem('fa-trash-can', '삭제', () => this.deleteFolder(item.name), 'wifm-context-danger');
+            }
+        } else {
+            const isPinned = !!(this.pinnedFiles?.has(item.name));
+            addItem('fa-thumbtack', isPinned ? '핀 고정 해제' : '상단 고정', () => this.togglePinFile(item.name), isPinned ? 'wifm-context-active' : '');
+            menu.appendChild(Object.assign(document.createElement('div'), { className: 'wifm-context-sep' }));
+            addItem('fa-arrows-up-down-left-right', '폴더 이동', () => {
+                this._selectedItems.clear();
+                this._selectedItems.add(item.name);
+                this.showFolderMovePopup();
+            });
+        }
+
+        document.body.appendChild(menu);
+        const mw = menu.offsetWidth, mh = menu.offsetHeight;
+        let x, y;
+        const triggerEl = e.currentTarget || e.target;
+        if (triggerEl && triggerEl.classList?.contains('wifm-more-btn')) {
+            const rect = triggerEl.getBoundingClientRect();
+            x = rect.right + 4;
+            y = rect.top;
+        } else {
+            x = (e.clientX ?? e.touches?.[0]?.clientX ?? 0);
+            y = (e.clientY ?? e.touches?.[0]?.clientY ?? 0);
+        }
+        if (x + mw > window.innerWidth) x = x - mw - 4;
+        if (y + mh > window.innerHeight) y = window.innerHeight - mh - 6;
+        menu.style.left = x + 'px';
+        menu.style.top = y + 'px';
+
+        const close = (ev) => {
+            if (!menu.contains(ev.target)) {
+                menu.remove();
+                document.removeEventListener('mousedown', close);
+            } else {
+                ev.stopPropagation();
+            }
+        };
+        const blockPropagation = (ev) => {
+            if (menu.contains(ev.target)) ev.stopPropagation();
+        };
+        menu.addEventListener('mousedown', (ev) => ev.stopPropagation());
+        menu.addEventListener('pointerdown', (ev) => ev.stopPropagation());
+        setTimeout(() => document.addEventListener('mousedown', close), 0);
+    },
+	
     showFolderMovePopup: function() {
         if (this._selectedItems.size === 0) return alert('선택된 항목 없음');
         const view   = document.getElementById('wifm-move-target-view');
@@ -892,12 +1121,41 @@ const WorldInfoFolderMove = {
             if (idx > -1) this.folderState[f].items.splice(idx, 1);
         }
         if (targetFolderName !== 'Unassigned') {
-            if (!this.folderState[targetFolderName]) this.folderState[targetFolderName] = { items: [] };
+            if (!this.folderState[targetFolderName]) this.folderState[targetFolderName] = { items: [], pinned: false };
             this.folderState[targetFolderName].items.push(lorebookName);
+        }
+        if (this.pinnedFiles?.has(lorebookName)) {
+            this.pinnedFiles.delete(lorebookName);
+            this.savePinnedFiles();
         }
         this.saveFolderState();
     },
+    _handleLorebookRename: function(oldName, newName) {
+        for (const fn in this.folderState) {
+            const items = this.folderState[fn].items;
+            const idx = items.indexOf(oldName);
+            if (idx > -1) {
+                items[idx] = newName;
+                break;
+            }
+        }
 
+        if (this.pinnedFiles?.has(oldName)) {
+            this.pinnedFiles.delete(oldName);
+            this.pinnedFiles.add(newName);
+            this.savePinnedFiles();
+        }
+
+        if (this._currentWorldName === oldName) {
+            this._currentWorldName = newName;
+            this.updateSelectedLorebookName(newName);
+        }
+
+        this.saveFolderState();
+        this._isRenaming = false;
+        this.refreshLorebookUI();
+        logger.log(`Lorebook renamed: "${oldName}" → "${newName}"`);
+    },
     setupCharacterWorldInfoPopupObserver: function() {
         const observer = new MutationObserver((mutations) => {
             for (const mutation of mutations) {
@@ -933,7 +1191,6 @@ const WorldInfoFolderMove = {
         const existing = document.getElementById('wifm-edit-modal');
         if (existing) existing.remove();
 
-        // ── DOM 완전 우회: loadWorldInfo로 직접 데이터 읽기 ──
         const lorebookName = this._currentWorldName;
         if (!lorebookName) return alert('로어북이 선택되지 않았습니다.');
 
@@ -1010,7 +1267,6 @@ const WorldInfoFolderMove = {
         if (entryData.vectorized) stateVal = 'vectorized';
         if (entryData.disable)    stateVal = 'disabled';
 
-        // position: position 숫자값 + role 조합
         let posVal = String(entryData.position ?? 0);
         // @D 계열(position=4)은 role로 구분, 일단 숫자만 처리
         const posOptions = [
@@ -1189,6 +1445,10 @@ const WorldInfoFolderMove = {
         modal.appendChild(btnRow);
         overlay.appendChild(modal);
         document.body.appendChild(overlay);
+        if (document.body.classList.contains('wifm-theme-light')) {
+            const modal = overlay.querySelector('div');
+            if (modal) modal.classList.add('wifm-light-theme');
+        }
     },
 
     // Title/Memo 추출 및 재삽입
@@ -1242,6 +1502,10 @@ const WorldInfoFolderMove = {
         `;
         overlay.appendChild(modal);
         document.body.appendChild(overlay);
+        if (document.body.classList.contains('wifm-theme-light')) {
+            const modal = overlay.querySelector('div');
+            if (modal) modal.classList.add('wifm-light-theme');
+        }
 
         const ta = modal.querySelector('#wifm-title-textarea');
         ta.value = titles.join('\n');
@@ -1354,6 +1618,10 @@ const WorldInfoFolderMove = {
 
         overlay.appendChild(modal);
         document.body.appendChild(overlay);
+        if (document.body.classList.contains('wifm-theme-light')) {
+            const modal = overlay.querySelector('div');
+            if (modal) modal.classList.add('wifm-light-theme');
+        }
 
         modal.querySelector('#wifm-bulk-close').onclick = () => overlay.remove();
 
