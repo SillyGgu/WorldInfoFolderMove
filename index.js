@@ -495,6 +495,33 @@ const WorldInfoFolderMove = {
         const win = document.getElementById('wifm-folder-explorer-window');
         this.isExplorerOpen = forceState !== undefined ? forceState : !this.isExplorerOpen;
         if (this.isExplorerOpen) {
+            if (win.parentElement !== document.body) {
+                document.body.appendChild(win);
+                // explorer 창 클릭이 패널 외부 클릭으로 잡히는 것을 방지
+                win.addEventListener('mousedown', (e) => e.stopPropagation(), true);
+                win.addEventListener('pointerdown', (e) => e.stopPropagation(), true);
+                win.addEventListener('touchstart', (e) => e.stopPropagation(), true);
+            }
+            // 버튼 위치 기준으로 explorer 창 위치 계산
+            const btn = document.getElementById('wifm-explorer-toggle-btn');
+            if (btn) {
+                const btnRect = btn.getBoundingClientRect();
+                const winW = window.innerWidth;
+                const winH = window.innerHeight;
+                const explorerW = Math.min(400, winW - 20);
+                const explorerH = Math.min(550, winH - btnRect.bottom - 10);
+                let left = btnRect.left;
+                let top = btnRect.bottom + 6;
+                // 오른쪽 화면 밖 넘침 방지
+                if (left + explorerW > winW - 10) {
+                    left = winW - explorerW - 10;
+                }
+                if (left < 10) left = 10;
+                win.style.left = left + 'px';
+                win.style.top = top + 'px';
+                win.style.width = explorerW + 'px';
+                win.style.height = explorerH + 'px';
+            }
             win.classList.add('visible');
             this.applyExplorerSettings();
             this.renderExplorerView();
@@ -960,7 +987,7 @@ const WorldInfoFolderMove = {
             const row = document.createElement('div');
             row.className = 'wifm-context-item' + (extraClass ? ' ' + extraClass : '');
             row.innerHTML = `<i class="fa-solid ${icon}"></i><span>${label}</span>`;
-            row.addEventListener('click', (ev) => { ev.stopPropagation(); menu.remove(); onClick(); });
+            row.addEventListener('click', (ev) => { ev.stopPropagation(); menu.remove(); removeCloseListeners(); onClick(); });
             menu.appendChild(row);
         };
 
@@ -1003,17 +1030,24 @@ const WorldInfoFolderMove = {
         const close = (ev) => {
             if (!menu.contains(ev.target)) {
                 menu.remove();
-                document.removeEventListener('mousedown', close);
-            } else {
-                ev.stopPropagation();
+                removeCloseListeners();
             }
         };
-        const blockPropagation = (ev) => {
-            if (menu.contains(ev.target)) ev.stopPropagation();
+        const removeCloseListeners = () => {
+            document.removeEventListener('mousedown', close, true);
+            document.removeEventListener('touchstart', close, true);
         };
+
+        // menu 자체 클릭은 닫기 차단
         menu.addEventListener('mousedown', (ev) => ev.stopPropagation());
         menu.addEventListener('pointerdown', (ev) => ev.stopPropagation());
-        setTimeout(() => document.addEventListener('mousedown', close), 0);
+        menu.addEventListener('touchstart', (ev) => ev.stopPropagation(), { passive: true });
+
+        setTimeout(() => {
+            // capture: true 로 등록하면 explorer window 의 stopPropagation 보다 먼저 실행됨
+            document.addEventListener('mousedown', close, true);
+            document.addEventListener('touchstart', close, { passive: true, capture: true });
+        }, 0);
     },
 	
     showFolderMovePopup: function() {
@@ -1221,7 +1255,7 @@ const WorldInfoFolderMove = {
             background:var(--background-color2, #1e1e2e);
             border:1px solid var(--separator-color);
             border-radius:10px; padding:18px; width:820px; max-width:95vw;
-            max-height:90vh; overflow-y:auto; display:flex; flex-direction:column; gap:10px;
+            max-height:90vh; overflow-y:auto; overflow-x:hidden; display:flex; flex-direction:column; gap:10px;
             box-shadow:0 8px 32px rgba(0,0,0,0.5);`;
         if (this.explorerSettings.lightTheme) modal.classList.add('wifm-light-theme');
 		
@@ -1309,14 +1343,14 @@ const WorldInfoFolderMove = {
         modal.appendChild(row('Content', fContent));
 
         const rowGrid = document.createElement('div');
-        rowGrid.style.cssText = 'display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px;';
+        rowGrid.style.cssText = 'display:grid; grid-template-columns:repeat(auto-fit, minmax(120px, 1fr)); gap:8px;';
         rowGrid.appendChild(row('State', fState));
         rowGrid.appendChild(row('Position', fPos));
         rowGrid.appendChild(row('Order', fOrder));
         modal.appendChild(rowGrid);
 
         const rowGrid2 = document.createElement('div');
-        rowGrid2.style.cssText = 'display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:8px;';
+        rowGrid2.style.cssText = 'display:grid; grid-template-columns:repeat(auto-fit, minmax(110px, 1fr)); gap:8px;';
         rowGrid2.appendChild(row('Probability %', fProb));
         rowGrid2.appendChild(row('Case Sensitive', fCaseSens));
         rowGrid2.appendChild(row('Whole Words', fWholeW));
