@@ -275,14 +275,34 @@ const WorldInfoFolderMove = {
         routeClick('wifm-world-info-entry-refresh',    'world_refresh');
 
         // bulk move 버튼
-        const bulkMove = document.getElementById('wibm_bulk_move_wi_entries');
         const entriesHeader = document.querySelector('.wifm-world-info-entries-header');
-        if (bulkMove && entriesHeader) {
-            bulkMove.className = 'menu_button menu_button_icon fa-solid fa-boxes-packing interactable';
-            bulkMove.style.display = '';
+        if (entriesHeader) {
+            const oldPlaceholder = document.getElementById('wibm_bulk_move_wi_entries');
+            if (oldPlaceholder) oldPlaceholder.remove();
+
+            let bulkMoverBtn = document.querySelector('body > .menu_button.fa-boxes-packing[id$="-open-transfer-popup"]');
+
+            if (!bulkMoverBtn) {
+                bulkMoverBtn = document.createElement('div');
+                bulkMoverBtn.id = 'wibm_bulk_move_wi_entries';
+                bulkMoverBtn.className = 'menu_button menu_button_icon fa-solid fa-boxes-packing interactable';
+                bulkMoverBtn.title = 'Bulk transfer lorebook entries';
+                bulkMoverBtn.addEventListener('click', () => {
+                    const realBtn = document.querySelector('[id$="-open-transfer-popup"].fa-boxes-packing');
+                    if (!realBtn) {
+                        logger.warn('WI-Bulk-Mover 버튼을 찾을 수 없습니다. 해당 확장이 설치되어 있는지 확인하세요.');
+                        return;
+                    }
+                    // loadLorebook에서 이미 world_editor_select 동기화가 완료되어 있으므로
+                    // 별도 조작 없이 바로 클릭
+                    realBtn.click();
+                });
+            }
+
+            bulkMoverBtn.style.display = '';
             const sep = entriesHeader.querySelector('.wifm-toolbar-sep');
-            if (sep) sep.after(bulkMove);
-            else entriesHeader.appendChild(bulkMove);
+            if (sep) sep.after(bulkMoverBtn);
+            else entriesHeader.appendChild(bulkMoverBtn);
         }
 
         // 검색 토글
@@ -549,8 +569,7 @@ const WorldInfoFolderMove = {
 
         const coreSelect = document.getElementById('world_editor_select');
         if (coreSelect) {
-            coreSelect.selectedIndex = 0; 
-            $(coreSelect).trigger('change');
+            $(coreSelect).val('').trigger('change.select2');
         }
 
         document.getElementById('world_popup_entries_list').innerHTML = '';
@@ -567,6 +586,17 @@ const WorldInfoFolderMove = {
             this.updateSelectedLorebookName(name);
             this.updateGlobalButtonState();
             this.updateActiveWorldInfoList();
+            // 다른 확장들이 현재 열린 WI를 인식할 수 있도록 world_editor_select 동기화
+            const sel = document.getElementById('world_editor_select');
+            if (sel) {
+                const matchingOption = Array.from(sel.options).find(opt => opt.text === name);
+                if (matchingOption) {
+                    $(sel).val(matchingOption.value).trigger('change.select2');
+                    logger.debug('world_editor_select 동기화 완료:', matchingOption.value, name);
+                } else {
+                    logger.warn('world_editor_select에서 일치하는 option 없음:', name);
+                }
+            }
         } catch (error) {
             logger.error('loadLorebook 오류:', error);
         }
@@ -1428,7 +1458,13 @@ const WorldInfoFolderMove = {
 
                 worldInfoCache.delete(lorebookName);
                 overlay.remove();
-                await showWorldEditor(lorebookName);
+
+                const ctx = (typeof SillyTavern !== 'undefined') ? SillyTavern.getContext() : null;
+                if (ctx && ctx.reloadWorldInfoEditor) {
+                    await ctx.reloadWorldInfoEditor(lorebookName, false);
+                } else {
+                    await showWorldEditor(lorebookName);
+                }
 
                 // 재렌더 후 원래 열려있던 entry 다시 열기
                 if (openUids.size > 0) {
@@ -1728,21 +1764,21 @@ const WorldInfoFolderMove = {
 
 
 jQuery(async () => {
-    const initExtension = async () => {
-        if (document.getElementById('WorldInfo') && document.getElementById('world_info')) {
-            await WorldInfoFolderMove.init();
-        } else if (typeof SillyTavern === 'undefined') {
-            setTimeout(initExtension, 1000);
-        } else {
-            await new Promise(resolve => setTimeout(resolve, 500));
-            if (document.getElementById('WorldInfo') && document.getElementById('world_info')) {
-                await WorldInfoFolderMove.init();
-            } else {
-                logger.error('WorldInfo 패널 또는 #world_info 요소를 찾을 수 없습니다.');
-                setTimeout(initExtension, 1000);
-            }
-        }
+    const doInit = async () => {
+        await WorldInfoFolderMove.init();
+        WorldInfoFolderMove.setupCharacterWorldInfoPopupObserver();
     };
-    initExtension();
-    WorldInfoFolderMove.setupCharacterWorldInfoPopupObserver();
+
+    if (event_types.APP_READY) {
+        eventSource.once(event_types.APP_READY, doInit);
+    } else {
+        const waitForDom = async () => {
+            if (document.getElementById('WorldInfo') && document.getElementById('world_info')) {
+                await doInit();
+            } else {
+                setTimeout(waitForDom, 500);
+            }
+        };
+        waitForDom();
+    }
 });
