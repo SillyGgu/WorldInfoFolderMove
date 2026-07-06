@@ -148,10 +148,16 @@ const WorldInfoFolderMove = {
     _listenersRegistered: false,
     _entryObserver: null,
     _csrfToken: null,
+    _loadingWorldName: null,
+    _currentWorldLockUntil: 0,
+    _globalButtonWorldName: null,
+    _isSyncingEditorSelect: false,
     isMoveMode: false,
     folderState: {},
+    activeLorebookNames: new Set(),
     explorerSettings: { scale: 1.0, lightTheme: false },
     storageKey: 'wifm-wi-folder-state',
+    activeLorebooksKey: 'wifm-active-lorebook-names',
     settingsKey: 'wifm-wi-explorer-settings',
     _currentPath: [],
     isExplorerOpen: false,
@@ -363,7 +369,8 @@ const WorldInfoFolderMove = {
         if (entriesList) {
             injectEditButtons(entriesList);
             if (this._entryObserver) this._entryObserver.disconnect();
-            this._entryObserver = new MutationObserver(() => injectEditButtons(entriesList));
+            const debouncedInjectEditButtons = debounce(() => injectEditButtons(entriesList), 100);
+            this._entryObserver = new MutationObserver(debouncedInjectEditButtons);
             this._entryObserver.observe(entriesList, { childList: true, subtree: true });
         }
 
@@ -465,16 +472,25 @@ const WorldInfoFolderMove = {
         if (coreEditorSelect) {
             $(coreEditorSelect).on('change', () => {
                 if (this._isDeselecting) return;
+                if (this._isSyncingEditorSelect) return;
                 setTimeout(() => {
+                    if (this._isSyncingEditorSelect) return;
                     const sel = document.getElementById('world_editor_select');
                     if (!sel) return;
                     const opt = sel.options[sel.selectedIndex];
                     const name = (opt && opt.value !== '' && opt.text && !opt.text.includes('Pick to Edit')) ? opt.text : null;
+                    if (name && this.shouldIgnoreExternalWorldName(name)) {
+                        this.updateGlobalButtonState();
+                        this.updateActiveWorldInfoList();
+                        return;
+                    }
                     if (name) {
                         this._currentWorldName = name;
+                        this._globalButtonWorldName = name;
                         this.updateSelectedLorebookName(name);
                     } else {
                         this._currentWorldName = null;
+                        this._globalButtonWorldName = null;
                         this.updateSelectedLorebookName(null);
                         document.getElementById('world_popup_entries_list').innerHTML = '';
                         document.getElementById('world_info_pagination').innerHTML = '';
@@ -493,11 +509,21 @@ const WorldInfoFolderMove = {
             window.displayWorldEntries = async function(name, data, ...args) {
                 const result = await originalDisplay.apply(this, [name, data, ...args]);
                 if (WorldInfoFolderMove._isDeselecting) return result;
+                if (name && WorldInfoFolderMove.shouldIgnoreExternalWorldName(name)) {
+                    WorldInfoFolderMove.updateGlobalButtonState();
+                    WorldInfoFolderMove.updateActiveWorldInfoList();
+                    const searchInput = document.getElementById('wifm-explorer-search');
+                    const currentSearch = (searchInput && searchInput.value.trim() !== '') ? searchInput.value : null;
+                    WorldInfoFolderMove.renderExplorerView(currentSearch);
+                    return result;
+                }
                 if (name) {
                     WorldInfoFolderMove._currentWorldName = name;
+                    WorldInfoFolderMove._globalButtonWorldName = name;
                     WorldInfoFolderMove.updateSelectedLorebookName(name);
                 } else {
                     WorldInfoFolderMove._currentWorldName = null;
+                    WorldInfoFolderMove._globalButtonWorldName = null;
                     WorldInfoFolderMove.updateSelectedLorebookName(null);
                 }
                 WorldInfoFolderMove.updateGlobalButtonState();
@@ -563,6 +589,7 @@ const WorldInfoFolderMove = {
     deselectCurrentLorebook: function() {
         this._isDeselecting = true;
         this._currentWorldName = null;
+        this._globalButtonWorldName = null;
         this.updateSelectedLorebookName(null);
         this.updateGlobalButtonState();
         this.updateActiveWorldInfoList();
@@ -581,24 +608,39 @@ const WorldInfoFolderMove = {
     },
     loadLorebook: async function(name) {
         try {
-            await showWorldEditor(name);
+            this._loadingWorldName = name;
+            this._currentWorldLockUntil = Date.now() + 1500;
             this._currentWorldName = name;
+            this._globalButtonWorldName = name;
             this.updateSelectedLorebookName(name);
             this.updateGlobalButtonState();
-            this.updateActiveWorldInfoList();
+            this.updateExplorerActiveState(name);
+
+            await showWorldEditor(name);
+            this._currentWorldName = name;
+            this._globalButtonWorldName = name;
+            this.updateSelectedLorebookName(name);
             // 다른 확장들이 현재 열린 WI를 인식할 수 있도록 world_editor_select 동기화
             const sel = document.getElementById('world_editor_select');
             if (sel) {
-                const matchingOption = Array.from(sel.options).find(opt => opt.text === name);
+                const matchingOption = this.getEditorLorebookOption(name);
                 if (matchingOption) {
-                    $(sel).val(matchingOption.value).trigger('change.select2');
-                    logger.debug('world_editor_select 동기화 완료:', matchingOption.value, name);
+                    this.applyEditorLorebookValue(sel, matchingOption.value);
                 } else {
-                    logger.warn('world_editor_select에서 일치하는 option 없음:', name);
+                    this.applyEditorLorebookValue(sel, '');
                 }
             }
+            this._currentWorldName = name;
+            this._globalButtonWorldName = name;
+            this.updateSelectedLorebookName(name);
+            this.updateGlobalButtonState();
+            this.updateActiveWorldInfoList();
         } catch (error) {
             logger.error('loadLorebook 오류:', error);
+        } finally {
+            setTimeout(() => {
+                if (this._loadingWorldName === name) this._loadingWorldName = null;
+            }, 1500);
         }
     },
 
@@ -654,28 +696,41 @@ const WorldInfoFolderMove = {
         }
 
         const allWiNames = world_names || [];
+        const allWiNameSet = new Set(allWiNames);
         const targetFolder = this._currentPath.length === 0 ? null : currentFolderName;
 
-        const lorebookFolderMap = new Map();
-        for (const fn in this.folderState) {
-            for (const item of this.folderState[fn].items) {
-                lorebookFolderMap.set(item, fn);
+        const buildLorebookFolderMap = () => {
+            const map = new Map();
+            for (const fn in this.folderState) {
+                const folderItems = Array.isArray(this.folderState[fn]?.items) ? this.folderState[fn].items : [];
+                for (const item of folderItems) map.set(item, fn);
             }
-        }
+            return map;
+        };
 
         const pinnedFileSet = this.pinnedFiles || new Set();
         const matchedFiles = [];
-        allWiNames.forEach(wiName => {
-            const assignedFolder = lorebookFolderMap.get(wiName) || 'Unassigned';
-            let shouldAdd = false;
-            if (searchTerm) {
-                if (wiName.toLowerCase().includes(searchTerm.toLowerCase())) shouldAdd = true;
-            } else {
-                if (targetFolder === 'Unassigned' && assignedFolder === 'Unassigned') shouldAdd = true;
-                else if (targetFolder && targetFolder === assignedFolder) shouldAdd = true;
-            }
-            if (shouldAdd) matchedFiles.push({ type: 'file', name: wiName, pinned: pinnedFileSet.has(wiName) });
-        });
+        if (!searchTerm && targetFolder && targetFolder !== 'Unassigned') {
+            const folderItems = Array.isArray(this.folderState[targetFolder]?.items) ? this.folderState[targetFolder].items : [];
+            folderItems.forEach(wiName => {
+                if (allWiNameSet.has(wiName)) {
+                    matchedFiles.push({ type: 'file', name: wiName, pinned: pinnedFileSet.has(wiName) });
+                }
+            });
+        } else {
+            const lorebookFolderMap = buildLorebookFolderMap();
+            allWiNames.forEach(wiName => {
+                const assignedFolder = lorebookFolderMap.get(wiName) || 'Unassigned';
+                let shouldAdd = false;
+                if (searchTerm) {
+                    if (wiName.toLowerCase().includes(searchTerm.toLowerCase())) shouldAdd = true;
+                } else {
+                    if (targetFolder === 'Unassigned' && assignedFolder === 'Unassigned') shouldAdd = true;
+                    else if (targetFolder && targetFolder === assignedFolder) shouldAdd = true;
+                }
+                if (shouldAdd) matchedFiles.push({ type: 'file', name: wiName, pinned: pinnedFileSet.has(wiName) });
+            });
+        }
 
         matchedFiles.sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
         items.push(...matchedFiles);
@@ -788,30 +843,49 @@ const WorldInfoFolderMove = {
             container.innerHTML = '<div style="grid-column:1/-1; text-align:center; padding:20px; opacity:0.6;">Empty</div>';
         }
     },
+
+    updateExplorerActiveState: function(name) {
+        document.querySelectorAll('#wifm-explorer-body .wifm-explorer-item[data-type="file"]').forEach(el => {
+            el.classList.toggle('active-wi', el.dataset.name === name);
+        });
+    },
 	
     toggleCurrentGlobalStatus: function() {
-        if (!this._currentWorldName) return;
+        const currentWorldName = this.getGlobalButtonLorebookName();
+        if (!currentWorldName) return;
         const worldInfoSelect = document.getElementById('world_info');
         if (!worldInfoSelect) return;
-        const option = Array.from(worldInfoSelect.options).find(opt => opt.text === this._currentWorldName);
-        if (option) {
-            option.selected = !option.selected;
-            $(worldInfoSelect).trigger('change');
-            this.updateGlobalButtonState();
-            this.refreshLorebookUI();
+        const option = this.getGlobalLorebookOption(currentWorldName);
+        const shouldActivate = !this.activeLorebookNames.has(currentWorldName);
+        if (shouldActivate) {
+            this.activeLorebookNames.add(currentWorldName);
+        } else {
+            this.activeLorebookNames.delete(currentWorldName);
         }
+        this.saveActiveLorebookNames();
+
+        if (option) {
+            const selectedValues = new Set(this.getSelectedGlobalLorebookValues());
+            if (shouldActivate) selectedValues.add(option.value);
+            else selectedValues.delete(option.value);
+            this.applySelectedGlobalLorebookValues([...selectedValues]);
+        }
+        this.updateGlobalButtonState();
+        this.refreshLorebookUI();
     },
 
     updateGlobalButtonState: function() {
         const btn = document.getElementById('wifm-global-toggle-btn');
         const txt = document.getElementById('wifm-global-toggle-text');
         const worldInfoSelect = document.getElementById('world_info');
-        if (!btn || !this._currentWorldName || !worldInfoSelect) {
+        const currentWorldName = this.getGlobalButtonLorebookName();
+        if (!btn || !currentWorldName || !worldInfoSelect) {
             if (btn) btn.style.display = 'none';
             return;
         }
         btn.style.display = 'inline-flex';
-        const isActive = Array.from(worldInfoSelect.selectedOptions).some(opt => opt.text === this._currentWorldName);
+        btn.dataset.lorebookName = currentWorldName;
+        const isActive = this.activeLorebookNames.has(currentWorldName);
         btn.classList.toggle('greenBG', isActive);
         if (txt) txt.textContent = isActive ? 'Activated' : 'Activate';
     },
@@ -842,12 +916,171 @@ const WorldInfoFolderMove = {
         if (el) el.textContent = name || 'None';
     },
 
+    shouldIgnoreExternalWorldName: function(name) {
+        if (!name || !this._currentWorldName || name === this._currentWorldName) return false;
+        return this._loadingWorldName === this._currentWorldName || Date.now() < this._currentWorldLockUntil;
+    },
+
+    getCurrentLorebookName: function() {
+        const name = typeof this._currentWorldName === 'string' ? this._currentWorldName.trim() : '';
+        return name || null;
+    },
+
+    getGlobalButtonLorebookName: function() {
+        const name = typeof this._globalButtonWorldName === 'string' ? this._globalButtonWorldName.trim() : '';
+        if (name) return name;
+        return this.getCurrentLorebookName();
+    },
+
+    normalizeLorebookName: function(name) {
+        if (typeof name !== 'string') return '';
+        return name
+            .normalize('NFKC')
+            .replace(/[\u200B-\u200D\uFEFF]/g, '')
+            .replace(/[\uFE00-\uFE0F]/g, '')
+            .replace(/\s+/gu, ' ')
+            .trim();
+    },
+
+    getEditorLorebookOption: function(name) {
+        const sel = document.getElementById('world_editor_select');
+        if (!sel) return null;
+        const target = this.normalizeLorebookName(name);
+        return Array.from(sel.options).find(opt => {
+            const candidates = [
+                opt.text,
+                opt.textContent,
+                opt.label,
+                opt.value,
+                opt.getAttribute('data-name'),
+            ].map(value => this.normalizeLorebookName(value));
+            return candidates.includes(target);
+        }) || null;
+    },
+
+    applyEditorLorebookValue: function(sel, value) {
+        this._isSyncingEditorSelect = true;
+        try {
+            $(sel).val(value).trigger('change.select2');
+        } finally {
+            setTimeout(() => {
+                this._isSyncingEditorSelect = false;
+            }, 150);
+        }
+    },
+
+    getGlobalLorebookOption: function(name) {
+        const sel = document.getElementById('world_info');
+        if (!sel) return null;
+        const target = this.normalizeLorebookName(name);
+        return this.getLorebookOptionMap(sel).get(target) || Array.from(sel.options).find(opt => {
+            const candidates = [
+                opt.text,
+                opt.textContent,
+                opt.label,
+                opt.value,
+                opt.getAttribute('data-name'),
+            ].map(value => this.normalizeLorebookName(value));
+            return candidates.includes(target);
+        }) || null;
+    },
+
+    getLorebookOptionMap: function(sel) {
+        const map = new Map();
+        Array.from(sel?.options || []).forEach(opt => {
+            [
+                opt.text,
+                opt.textContent,
+                opt.label,
+                opt.value,
+                opt.getAttribute('data-name'),
+            ].forEach(value => {
+                const normalized = this.normalizeLorebookName(value);
+                if (normalized && !map.has(normalized)) map.set(normalized, opt);
+            });
+        });
+        return map;
+    },
+
+    getSelectedGlobalLorebookValues: function() {
+        const sel = document.getElementById('world_info');
+        if (!sel) return [];
+        const value = $(sel).val();
+        if (Array.isArray(value)) return value;
+        if (value) return [value];
+        return Array.from(sel.selectedOptions).map(opt => opt.value);
+    },
+
+    applySelectedGlobalLorebookValues: function(values) {
+        const sel = document.getElementById('world_info');
+        if (!sel) return;
+        const uniqueValues = [...new Set(values)];
+        $(sel).val(uniqueValues).trigger('change');
+    },
+
+    setGlobalLorebookEnabled: function(name, enabled) {
+        const sel = document.getElementById('world_info');
+        if (!sel) return;
+        const option = this.getGlobalLorebookOption(name);
+        if (!option) return;
+        const selectedValues = new Set(this.getSelectedGlobalLorebookValues());
+        if (enabled) selectedValues.add(option.value);
+        else selectedValues.delete(option.value);
+        this.applySelectedGlobalLorebookValues([...selectedValues]);
+        this.updateGlobalButtonState();
+        this.updateActiveWorldInfoList();
+        this.renderExplorerView();
+    },
+
     updateActiveWorldInfoList: function() {
         const sel = document.getElementById('world_info');
         const el = document.getElementById('wifm-active-list-content');
         if (sel && el) {
-            const names = Array.from(sel.selectedOptions).map(o => o.text);
-            el.textContent = names.length ? names.join(', ') : 'None';
+            const existingWorldNames = new Set(world_names || []);
+            const selectedValues = new Set(this.getSelectedGlobalLorebookValues());
+            const optionMap = this.getLorebookOptionMap(sel);
+            const names = Array.from(this.activeLorebookNames)
+                .filter(name => existingWorldNames.has(name))
+                .sort((a, b) => a.localeCompare(b));
+
+            if (!names.length) {
+                el.textContent = 'None';
+                return;
+            }
+
+            el.innerHTML = '';
+            names.forEach(name => {
+                const option = optionMap.get(this.normalizeLorebookName(name));
+                const isGloballyEnabled = option ? selectedValues.has(option.value) : false;
+                const item = document.createElement('span');
+                item.className = 'wifm-active-lorebook-item';
+                item.classList.toggle('wifm-active-lorebook-item-disabled', !isGloballyEnabled);
+
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.className = 'wifm-active-lorebook-checkbox';
+                checkbox.checked = isGloballyEnabled;
+                checkbox.title = 'Toggle global lorebook';
+                checkbox.addEventListener('change', (e) => {
+                    e.stopPropagation();
+                    this.setGlobalLorebookEnabled(name, checkbox.checked);
+                });
+
+                const nameButton = document.createElement('button');
+                nameButton.type = 'button';
+                nameButton.className = 'wifm-active-lorebook-name';
+                nameButton.textContent = name;
+                nameButton.title = 'Open lorebook';
+                nameButton.addEventListener('click', async (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    await this.loadLorebook(name);
+                });
+
+                item.appendChild(checkbox);
+                item.appendChild(nameButton);
+                el.appendChild(item);
+            });
         }
     },
 
@@ -865,11 +1098,15 @@ const WorldInfoFolderMove = {
             const pinnedFilesRaw = accountStorage.getItem('wifm-pinned-files');
             this.pinnedFiles = pinnedFilesRaw ? new Set(JSON.parse(pinnedFilesRaw)) : new Set();
 
+            const activeLorebooksRaw = accountStorage.getItem(this.activeLorebooksKey);
+            this.activeLorebookNames = activeLorebooksRaw ? new Set(JSON.parse(activeLorebooksRaw)) : new Set();
+
             const settings = accountStorage.getItem(this.settingsKey);
             if (settings) this.explorerSettings = { ...this.explorerSettings, ...JSON.parse(settings) };
         } catch (e) {
             this.folderState = {};
             this.pinnedFiles = new Set();
+            this.activeLorebookNames = new Set();
             logger.error('폴더 상태 로드 오류', e);
         }
     },
@@ -878,6 +1115,9 @@ const WorldInfoFolderMove = {
     },
     savePinnedFiles: function() {
         accountStorage.setItem('wifm-pinned-files', JSON.stringify([...this.pinnedFiles]));
+    },
+    saveActiveLorebookNames: function() {
+        accountStorage.setItem(this.activeLorebooksKey, JSON.stringify([...this.activeLorebookNames]));
     },
 
     saveExplorerSettings: function() {
@@ -1212,6 +1452,7 @@ const WorldInfoFolderMove = {
 
         if (this._currentWorldName === oldName) {
             this._currentWorldName = newName;
+            this._globalButtonWorldName = newName;
             this.updateSelectedLorebookName(newName);
         }
 
